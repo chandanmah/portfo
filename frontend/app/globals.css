@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 36 33% 93%; /* gentle-sand */
+    --foreground: 0 0% 18%; /* graphite-black */
+
+    --card: 36 33% 93%; /* gentle-sand */
+    --card-foreground: 0 0% 18%; /* graphite-black */
+
+    --popover: 36 33% 93%; /* gentle-sand */
+    --popover-foreground: 0 0% 18%; /* graphite-black */
+
+    --primary: 33 59% 69%; /* royal-honey */
+    --primary-foreground: 0 0% 98%; /* white */
+
+    --secondary: 36 33% 93%; /* gentle-sand */
+    --secondary-foreground: 0 0% 18%; /* graphite-black */
+
+    --muted: 0 0% 49%; /* storm-gray */
+    --muted-foreground: 0 0% 18%; /* graphite-black */
+
+    --accent: 36 33% 93%; /* gentle-sand */
+    --accent-foreground: 0 0% 18%; /* graphite-black */
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 33 59% 69%; /* royal-honey */
+    --input: 33 59% 69%; /* royal-honey */
+    --ring: 33 59% 69%; /* royal-honey */
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    background-image: url("/images/background.png");
+    background-size: cover;
+    background-attachment: fixed;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-playfair;
+  }
+  p {
+    @apply font-sans;
+  }
+  blockquote {
+    @apply font-crimson;
+  }
+}
+
+.masonry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-gap: 20px;
+}
+
+.artwork-card {
+  transition: transform 0.3s ease;
+}
+
+.artwork-card:hover {
+  transform: translateY(-5px);
+}
+
+.section-fade-in {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.section-fade-in.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.nav-link {
+  position: relative;
+}
+
+.nav-link::after {
+  content: "";
+  position: absolute;
+  width: 0;
+  height: 2px;
+  bottom: -2px;
+  left: 0;
+  background-color: hsl(var(--primary));
+  transition: width 0.3s ease;
+}
+
+.nav-link:hover::after,
+.nav-link.active::after {
+  width: 100%;
+}
