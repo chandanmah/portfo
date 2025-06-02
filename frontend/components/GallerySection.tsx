@@ -21,9 +21,39 @@ const GallerySection: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [visibleItems, setVisibleItems] = useState<Record<string, boolean>>({});
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const [isViewerOpen, setIsViewerOpen] = useState<boolean>(false);
+  const [selectedImage, setSelectedImage] = useState<GalleryMedia | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
-  // const mediaItems = staticMediaItems; // Replaced by state
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const modalContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      document.documentElement.classList.add('gallery-modal-active');
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.documentElement.classList.remove('gallery-modal-active');
+      document.body.style.overflow = '';
+    }
+    // Cleanup function to ensure styles are reset if component unmounts while modal is open
+    return () => {
+      document.documentElement.classList.remove('gallery-modal-active');
+      document.body.style.overflow = '';
+    };
+  }, [isModalOpen]);
+
+  useEffect(() => {
+    if (isModalOpen && selectedImage && modalContentRef.current) {
+      modalContentRef.current.focus(); // Focus for keyboard navigation if needed
+      // Delay scrollIntoView slightly to allow modal to render and transition
+      setTimeout(() => {
+        modalContentRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'center'
+        });
+      }, 100); // Adjust delay as needed
+    }
+  }, [isModalOpen, selectedImage]);
 
   useEffect(() => {
     const fetchGalleryImages = async () => {
@@ -72,34 +102,41 @@ const GallerySection: React.FC = () => {
     };
   }, [mediaItems]); // Dependency array now includes mediaItems to re-run observer setup when items change
 
-  const openImageViewer = (index: number) => {
+  const openImageModal = (image: GalleryMedia, index: number) => {
+    setSelectedImage(image);
     setCurrentImageIndex(index);
-    setIsViewerOpen(true);
+    setIsModalOpen(true); // This will trigger the useEffect above
+    // Scroll to center logic will be in a useEffect dependent on isModalOpen and selectedImage
   };
 
-  const closeImageViewer = useCallback(() => {
-    setIsViewerOpen(false);
+  const closeImageModal = useCallback(() => {
+    setIsModalOpen(false); // This will trigger the useEffect above
+    setSelectedImage(null);
   }, []);
 
-  const goToNextImage = useCallback(() => {
-    setCurrentImageIndex((prevIndex) => (prevIndex + 1) % mediaItems.length);
-  }, [mediaItems.length]);
-
-  const goToPrevImage = useCallback(() => {
-    setCurrentImageIndex((prevIndex) => (prevIndex - 1 + mediaItems.length) % mediaItems.length);
-  }, [mediaItems.length]);
+  const navigateImage = useCallback((direction: 'next' | 'prev') => {
+    if (!mediaItems.length) return;
+    let newIndex = currentImageIndex;
+    if (direction === 'next') {
+      newIndex = (currentImageIndex + 1) % mediaItems.length;
+    } else {
+      newIndex = (currentImageIndex - 1 + mediaItems.length) % mediaItems.length;
+    }
+    setCurrentImageIndex(newIndex);
+    setSelectedImage(mediaItems[newIndex]);
+  }, [currentImageIndex, mediaItems]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isViewerOpen) return;
+      if (!isModalOpen) return;
       if (event.key === 'Escape') {
-        closeImageViewer();
+        closeImageModal();
       }
       if (event.key === 'ArrowRight') {
-        goToNextImage();
+        navigateImage('next');
       }
       if (event.key === 'ArrowLeft') {
-        goToPrevImage();
+        navigateImage('prev');
       }
     };
 
@@ -107,7 +144,7 @@ const GallerySection: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isViewerOpen, closeImageViewer, goToNextImage, goToPrevImage]);
+  }, [isModalOpen, closeImageModal, navigateImage]); // Added navigateImage to dependency array
 
   if (isLoading) {
     return <div className="text-center py-12 text-gray-600">Loading gallery...</div>;
@@ -142,91 +179,96 @@ const GallerySection: React.FC = () => {
                 }`}
                 // Added `break-inside-avoid` to prevent items from breaking across columns
                 // Added `mb-4` to ensure consistent vertical spacing if `space-y-4` on parent isn't enough or for items at the bottom of columns
-                onClick={() => openImageViewer(index)}
+                onClick={() => openImageModal(item, index)}
               >
-                <div className="relative w-full h-auto aspect-w-1 aspect-h-1 sm:aspect-none">
+                <div className="relative w-full h-auto">
                   <Image
                     src={item.url} // Use the static URL directly
                     alt={item.name || 'Gallery image'}
-                    layout="intrinsic" // Changed from fill to intrinsic
-                    width={item.width || 500} // Provide a default or actual width
+                    layout="responsive" // Ensures image scales with container while maintaining aspect ratio
+                    width={item.width || 700} // Provide a default or actual width
                     height={item.height || 500} // Provide a default or actual height
-                    objectFit="contain" // Changed from cover to contain
-                    className="transition-transform duration-500 ease-in-out group-hover:scale-105 w-full h-full object-contain"
+                    objectFit="contain" // Ensures the whole image is visible within its bounds
+                    className="transition-transform duration-500 ease-in-out group-hover:scale-105 w-full h-full"
                     unoptimized
                   />
-                </div>
-                {/* Overlay with name and subtitle on hover */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 ease-in-out flex flex-col justify-end p-6">
-                  <h3 className="text-white text-lg font-semibold transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 ease-in-out truncate" title={item.name}>
-                    {item.name || 'Artwork'}
-                  </h3>
-                  {item.subtitle && (
-                    <p className="text-white text-sm mt-1 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 ease-in-out delay-75 truncate" title={item.subtitle}>
-                      {item.subtitle}
-                    </p>
-                  )}
+                  {/* Glass card overlay on hover */}
+                  <div className="absolute bottom-0 left-0 right-0 h-0 group-hover:h-auto group-hover:max-h-[50%] bg-white/10 backdrop-blur-lg border-t border-white/20 shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 ease-in-out flex flex-col justify-center items-center p-4 overflow-hidden">
+                    <h3 className="text-white text-lg font-semibold text-center" title={item.name}>
+                      {item.name || 'Artwork'}
+                    </h3>
+                    {item.subtitle && (
+                      <p className="text-white text-sm mt-1 italic text-center" title={item.subtitle}>
+                        {item.subtitle}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
-      {isViewerOpen && mediaItems.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-sm p-4">
-          <button 
-            onClick={closeImageViewer} 
-            className="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 transition-colors z-50"
-            aria-label="Close image viewer"
+      {isModalOpen && selectedImage && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xl p-4 transition-opacity duration-300 ease-in-out" // Adjusted bg-black/60 to bg-black/30 and increased blur to backdrop-blur-xl for more pronounced effect
+          onClick={closeImageModal} // Close modal when clicking on the backdrop
+        >
+          <div 
+            ref={modalContentRef}
+            tabIndex={-1} // Make div focusable
+            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-4xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none" // Changed bg-white/10 to bg-white/5, increased backdrop-blur-2xl, changed border-white/20 to border-white/10, added overflow-auto for scrolling if content exceeds max-h, added focus:outline-none
+            onClick={(e) => e.stopPropagation()} // Prevent closing modal when clicking inside the card content
           >
-            &times;
-          </button>
-          
-          <button 
-            onClick={goToPrevImage} 
-            className="absolute left-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 transition-colors p-2 bg-black bg-opacity-30 rounded-full z-50"
-            aria-label="Previous image"
-            disabled={mediaItems.length <= 1}
-          >
-            &#10094;
-          </button>
+            <button 
+              onClick={closeImageModal} 
+              className="absolute top-2 right-2 text-white/80 hover:text-white text-4xl bg-transparent hover:bg-black/30 rounded-full w-12 h-12 flex items-center justify-center transition-colors z-20"
+              aria-label="Close image modal"
+            >
+              &times;
+            </button>
 
-          <div className="relative max-w-full max-h-full flex flex-col items-center justify-center">
-            <Image 
-              src={mediaItems[currentImageIndex].url}
-              alt={mediaItems[currentImageIndex].name || 'Fullscreen gallery image'}
-              layout="intrinsic"
-              width={1200} // Adjust as needed, or use actual image dimensions if available
-              height={800} // Adjust as needed, or use actual image dimensions if available
-              objectFit="contain"
-              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
-              unoptimized
-              priority // Prioritize loading of the current fullscreen image
-            />
-            {(mediaItems[currentImageIndex].name || mediaItems[currentImageIndex].subtitle) && (
-              <div className="mt-4 text-white text-center bg-black bg-opacity-60 px-4 py-3 rounded-lg">
-                {mediaItems[currentImageIndex].name && (
-                  <p className="text-lg font-semibold">
-                    {mediaItems[currentImageIndex].name}
-                  </p>
-                )}
-                {mediaItems[currentImageIndex].subtitle && (
-                  <p className="text-sm mt-1">
-                    {mediaItems[currentImageIndex].subtitle}
-                  </p>
-                )}
-              </div>
+            {/* Navigation Buttons */} 
+            {mediaItems.length > 1 && (
+              <>
+                <button
+                  onClick={() => navigateImage('prev')}
+                  className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full transition-colors text-2xl sm:text-3xl"
+                  aria-label="Previous image"
+                >
+                  &#x276E;
+                </button>
+                <button
+                  onClick={() => navigateImage('next')}
+                  className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full transition-colors text-2xl sm:text-3xl"
+                  aria-label="Next image"
+                >
+                  &#x276F;
+                </button>
+              </>
             )}
-          </div>
 
-          <button 
-            onClick={goToNextImage} 
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 transition-colors p-2 bg-black bg-opacity-30 rounded-full z-50"
-            aria-label="Next image"
-            disabled={mediaItems.length <= 1}
-          >
-            &#10095;
-          </button>
+            
+            {/* Image container - ensure it takes available space and centers the image, allowing natural aspect ratio with object-contain */}
+            <div className="w-full h-full flex-grow flex items-center justify-center overflow-hidden py-2 sm:py-2">
+              <Image 
+                src={selectedImage.url}
+                alt={selectedImage.name || 'Enlarged gallery image'}
+                width={selectedImage.width || 1200} // Adjusted for potentially larger modal
+                height={selectedImage.height || 900} // Adjusted for potentially larger modal
+                objectFit="contain" // Ensures the whole image is visible
+                className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+                unoptimized
+              />
+            </div>
+            {/* Text container for title and subtitle */}
+            <div className="text-center flex-shrink-0">
+              <h3 className="text-white text-2xl font-semibold mb-1">{selectedImage.name}</h3>
+              {selectedImage.subtitle && (
+                <p className="text-gray-300 text-md italic">{selectedImage.subtitle}</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </section>
