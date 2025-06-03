@@ -2,12 +2,20 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Mail, Phone, MapPin } from "lucide-react"
+
+interface ContactData {
+  email: string;
+  phone: string;
+  location: string;
+  studioVisitsText: string;
+  emailRouting: string;
+}
 
 export default function ContactSection() {
   const [formData, setFormData] = useState({
@@ -17,6 +25,31 @@ export default function ContactSection() {
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [contactData, setContactData] = useState<ContactData>({
+    email: 'contact@mrmahanta.com',
+    phone: '(314) 555-1234',
+    location: 'St. Louis, Missouri',
+    studioVisitsText: 'Studio visits are available by appointment. Please contact me to arrange a visit to see my works in person and discuss potential commissions or acquisitions.',
+    emailRouting: 'contact@mrmahanta.com'
+  })
+
+  // Fetch contact data on component mount
+  useEffect(() => {
+    fetchContactData()
+  }, [])
+
+  const fetchContactData = async () => {
+    try {
+      const response = await fetch('/api/admin/contact')
+      if (response.ok) {
+        const data: ContactData = await response.json()
+        setContactData(data)
+      }
+    } catch (error) {
+      console.error('Error fetching contact data:', error)
+      // Keep default values if fetch fails
+    }
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -27,15 +60,30 @@ export default function ContactSection() {
     e.preventDefault()
     setIsSubmitting(true)
 
-    // Simulate form submission
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      })
 
-    setIsSubmitting(false)
-    setIsSubmitted(true)
-    setFormData({ name: "", email: "", message: "" })
+      const result = await response.json()
 
-    // Reset success message after 5 seconds
-    setTimeout(() => setIsSubmitted(false), 5000)
+      if (response.ok) {
+        setIsSubmitted(true)
+        setFormData({ name: '', email: '', message: '' })
+        // Reset success message after 5 seconds
+        setTimeout(() => setIsSubmitted(false), 5000)
+      } else {
+        console.error('Error submitting form:', result.message)
+      }
+    } catch (error) {
+      console.error('Error submitting form:', error)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -111,21 +159,21 @@ export default function ContactSection() {
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <Mail className="h-5 w-5 text-primary" />
-                  <a href="mailto:contact@mrmahanta.com" className="hover:text-primary transition-colors">
-                    contact@mrmahanta.com
+                  <a href={`mailto:${contactData.email}`} className="hover:text-primary transition-colors">
+                    {contactData.email}
                   </a>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <Phone className="h-5 w-5 text-primary" />
-                  <a href="tel:+13145551234" className="hover:text-primary transition-colors">
-                    (314) 555-1234
+                  <a href={`tel:${contactData.phone.replace(/[^\d+]/g, '')}`} className="hover:text-primary transition-colors">
+                    {contactData.phone}
                   </a>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <MapPin className="h-5 w-5 text-primary" />
-                  <span>St. Louis, Missouri</span>
+                  <span>{contactData.location}</span>
                 </div>
               </div>
             </CardContent>
@@ -135,8 +183,7 @@ export default function ContactSection() {
             <CardContent className="p-6">
               <h3 className="font-playfair text-xl font-bold mb-4">Studio Visits</h3>
               <p>
-                Studio visits are available by appointment. Please contact me to arrange a visit to see my works in
-                person and discuss potential commissions or acquisitions.
+                {contactData.studioVisitsText}
               </p>
             </CardContent>
           </Card>

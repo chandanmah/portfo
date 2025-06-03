@@ -85,10 +85,10 @@ export default function HeroSection() {
                 Exploring the delicate beauty of life through the flowing medium of watercolor. With over 15 years of dedication, my paintings capture fleeting moments of beauty with remarkable sensitivity. Each piece is a meditation on patience and presence, inviting you to slow down and appreciate the subtle details that often go unnoticed.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Button asChild variant="outline" className="rounded-[1.25rem] bg-[#8C6239]/80 hover:bg-[#7A5530] text-[#FFF8EF] hover:text-[#FFF8EF] border-[#70463C] backdrop-blur-lg px-8 py-4 text-lg font-semibold shadow-xl transition-all duration-300 transform hover:scale-105">
+                <Button asChild variant="outline" className="rounded-[1.25rem] bg-[#8C6239]/80 hover:bg-[#7A5530] text-[#F7EEDD] hover:text-[#F7EEDD] border-[#70463C] backdrop-blur-lg px-8 py-4 text-lg font-semibold shadow-xl transition-all duration-300 transform hover:scale-105">
                   <a href="#gallery" onClick={smoothScrollTo('gallery')}>Explore My Works</a>
                 </Button>
-                <Button asChild variant="outline" className="rounded-[1.25rem] bg-[#70463C]/80 hover:bg-[#603C33] text-[#FFF8EF] hover:text-[#FFF8EF] border-[#70463C] backdrop-blur-lg px-8 py-4 text-lg font-semibold shadow-xl transition-all duration-300 transform hover:scale-105">
+                <Button asChild variant="outline" className="rounded-[1.25rem] bg-[#70463C]/80 hover:bg-[#603C33] text-[#F7EEDD] hover:text-[#F7EEDD] border-[#70463C] backdrop-blur-lg px-8 py-4 text-lg font-semibold shadow-xl transition-all duration-300 transform hover:scale-105">
                   <a href="#contact" onClick={smoothScrollTo('contact')} className="flex items-center gap-2">
                     Contact Me <Mail className="h-6 w-6" />
                   </a>

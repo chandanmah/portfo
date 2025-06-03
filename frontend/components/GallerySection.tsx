@@ -181,7 +181,7 @@ const GallerySection: React.FC = () => {
                 // Added `mb-4` to ensure consistent vertical spacing if `space-y-4` on parent isn't enough or for items at the bottom of columns
                 onClick={() => openImageModal(item, index)}
               >
-                <div className="relative w-full h-auto">
+                <div className="relative w-full h-full">
                   <Image
                     src={item.url} // Use the static URL directly
                     alt={item.name || 'Gallery image'}
@@ -217,7 +217,7 @@ const GallerySection: React.FC = () => {
           <div 
             ref={modalContentRef}
             tabIndex={-1} // Make div focusable
-            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-4xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none" // Changed bg-white/10 to bg-white/5, increased backdrop-blur-2xl, changed border-white/20 to border-white/10, added overflow-auto for scrolling if content exceeds max-h, added focus:outline-none
+            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none" // Changed bg-white/10 to bg-white/5, increased backdrop-blur-2xl, changed border-white/20 to border-white/10, added overflow-auto for scrolling if content exceeds max-h, added focus:outline-none
             onClick={(e) => e.stopPropagation()} // Prevent closing modal when clicking inside the card content
           >
             <button 

@@ -24,9 +24,9 @@ const crimson = Crimson_Text({
 })
 
 export const metadata: Metadata = {
-  title: "Mr. Mahanta | Watercolor Artist",
-  description: "Portfolio of watercolor paintings and artworks by Mr. Mahanta",
-    generator: 'v0.dev'
+  title: "Chandan Mahanta | Watercolor Artist",
+  description: "Portfolio of watercolor paintings and artworks by Chandan Mahanta",
+    creator: 'Jerry Bora'
 }
 
 export default function RootLayout({

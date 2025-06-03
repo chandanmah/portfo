@@ -18,6 +18,13 @@ const navLinks = [
   { href: "#contact", label: "Contact" },
 ]
 
+const smoothScrollTo = (id: string) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+  event.preventDefault();
+  document.getElementById(id)?.scrollIntoView({
+    behavior: 'smooth'
+  });
+};
+
 export default function Navbar() {
   const [isVisible, setIsVisible] = useState(false);
   const [isGalleryModalActive, setIsGalleryModalActive] = useState(false);
@@ -85,6 +92,7 @@ export default function Navbar() {
             <Link
               key={link.href}
               href={link.href}
+              onClick={smoothScrollTo(link.href.substring(1))}
               className="px-6 py-3 rounded-full text-white/90 hover:text-white transition-all duration-300 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 hover:border-white/30 shadow-md hover:shadow-lg font-medium"
             >
               {link.label}
@@ -111,6 +119,7 @@ export default function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  onClick={smoothScrollTo(link.href.substring(1))}
                   className="px-4 py-3 rounded-lg text-white/90 hover:text-white transition-all duration-300 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 hover:border-white/30 text-lg font-medium shadow-md hover:shadow-lg"
                 >
                   {link.label}
