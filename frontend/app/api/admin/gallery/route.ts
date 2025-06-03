@@ -4,13 +4,27 @@ import path from 'path';
 
 interface GalleryImage {
   id: string;
-  url: string;
   name: string;
-  // Add other metadata like title, description if needed
+  subtitle: string;
+  imageUrl: string;
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'galleryData.json');
-const publicUploadsGalleryDir = path.join(process.cwd(), 'public', 'uploads', 'gallery');
+interface GalleryData {
+  galleryImages: GalleryImage[];
+}
+
+// Use environment variables for production or fallback to local file
+const dataFilePath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/galleryData.json' 
+  : path.join(process.cwd(), 'data', 'galleryData.json');
+const publicUploadsGalleryDir = process.env.NODE_ENV === 'production'
+  ? '/tmp/uploads'
+  : path.join(process.cwd(), 'public', 'uploads', 'gallery');
+
+// Default gallery data for production
+const defaultGalleryData: GalleryData = {
+  galleryImages: []
+};
 
 async function ensureDirectoryExists(directoryPath: string) {
   try {
@@ -20,23 +34,38 @@ async function ensureDirectoryExists(directoryPath: string) {
   }
 }
 
-async function readGalleryData(): Promise<{ galleryImages: GalleryImage[] }> {
+async function readGalleryData(): Promise<GalleryData> {
   try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist or is empty, return a default structure
-    if (error.code === 'ENOENT') {
-      return { galleryImages: [] };
+    if (process.env.NODE_ENV === 'production') {
+      // In production, try to read from temp file or return default data
+      try {
+        const data = await fs.promises.readFile(dataFilePath, 'utf8');
+        return JSON.parse(data);
+      } catch {
+        return defaultGalleryData;
+      }
     }
-    console.error('Error reading gallery data:', error);
-    throw error; // Re-throw to be caught by the handler
+    await ensureDirectoryExists(path.dirname(dataFilePath));
+    const data = await fs.promises.readFile(dataFilePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return defaultGalleryData;
   }
 }
 
-async function writeGalleryData(data: { galleryImages: GalleryImage[] }) {
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+async function writeGalleryData(data: GalleryData): Promise<void> {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      // In production, write to temp directory
+      await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+      return;
+    }
+    await ensureDirectoryExists(path.dirname(dataFilePath));
+    await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error('Error writing gallery data:', error);
+    throw error;
+  }
 }
 
 // GET handler to retrieve all gallery images

@@ -2,8 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 
-const dataFilePath = path.join(process.cwd(), 'data', 'adminData.json');
-const publicUploadsAvatarDir = path.join(process.cwd(), 'public', 'uploads', 'avatar');
+interface AvatarData {
+  avatarUrl: string;
+}
+
+// Use environment variables for production or fallback to local file
+const dataFilePath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/avatarData.json' 
+  : path.join(process.cwd(), 'data', 'adminData.json');
+const publicUploadsAvatarDir = process.env.NODE_ENV === 'production'
+  ? '/tmp/uploads'
+  : path.join(process.cwd(), 'public', 'uploads', 'avatar');
+
+// Default avatar data for production
+const defaultAvatarData: AvatarData = {
+  avatarUrl: process.env.DEFAULT_AVATAR_URL || ''
+};
 
 async function ensureDirectoryExists(directoryPath: string) {
   try {
@@ -16,17 +30,21 @@ async function ensureDirectoryExists(directoryPath: string) {
 // GET handler to retrieve avatar data
 export async function GET() {
   try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    const data = JSON.parse(jsonData);
-    return NextResponse.json(data);
+    if (process.env.NODE_ENV === 'production') {
+      // In production, try to read from temp file or return default data
+      try {
+        const data = await fs.promises.readFile(dataFilePath, 'utf8');
+        return NextResponse.json(JSON.parse(data));
+      } catch {
+        return NextResponse.json(defaultAvatarData);
+      }
+    }
+    await ensureDirectoryExists(path.dirname(dataFilePath));
+    const data = await fs.promises.readFile(dataFilePath, 'utf8');
+    return NextResponse.json(JSON.parse(data));
   } catch (error) {
     console.error('Error reading avatar data:', error);
-    // If the file doesn't exist or is empty, return a default structure
-    if (error.code === 'ENOENT') {
-      return NextResponse.json({ avatarUrl: '' });
-    }
-    return NextResponse.json({ message: 'Error reading avatar data' }, { status: 500 });
+    return NextResponse.json(defaultAvatarData);
   }
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 
 interface SocialMediaData {
@@ -8,7 +8,17 @@ interface SocialMediaData {
   twitter: string;
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'socialData.json');
+// Use environment variables for production or fallback to local file
+const socialDataPath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/socialData.json' 
+  : path.join(process.cwd(), 'data', 'socialData.json');
+
+// Default social media data for production
+const defaultSocialData: SocialMediaData = {
+  instagram: process.env.SOCIAL_INSTAGRAM || 'https://instagram.com/yourprofile',
+  facebook: process.env.SOCIAL_FACEBOOK || 'https://facebook.com/yourprofile',
+  twitter: process.env.SOCIAL_TWITTER || 'https://twitter.com/yourprofile'
+};
 
 async function ensureDirectoryExists(directoryPath: string) {
   try {
@@ -20,26 +30,36 @@ async function ensureDirectoryExists(directoryPath: string) {
 
 async function readSocialData(): Promise<SocialMediaData> {
   try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist, return default structure
-    if (error.code === 'ENOENT') {
-      return {
-        instagram: 'https://instagram.com/mrmahanta',
-        facebook: 'https://facebook.com/mrmahanta',
-        twitter: 'https://twitter.com/mrmahanta'
-      };
+    if (process.env.NODE_ENV === 'production') {
+      // In production, try to read from temp file or return default data
+      try {
+        const data = await fs.promises.readFile(socialDataPath, 'utf8');
+        return JSON.parse(data);
+      } catch {
+        return defaultSocialData;
+      }
     }
-    console.error('Error reading social data:', error);
-    throw error;
+    await ensureDirectoryExists(path.dirname(socialDataPath));
+    const data = await fs.promises.readFile(socialDataPath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return defaultSocialData;
   }
 }
 
-async function writeSocialData(data: SocialMediaData) {
-  await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+async function writeSocialData(data: SocialMediaData): Promise<void> {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      // In production, write to temp directory
+      await fs.promises.writeFile(socialDataPath, JSON.stringify(data, null, 2));
+      return;
+    }
+    await ensureDirectoryExists(path.dirname(socialDataPath));
+    await fs.promises.writeFile(socialDataPath, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error('Error writing social data:', error);
+    throw error;
+  }
 }
 
 // GET handler to retrieve social media data
@@ -56,9 +76,8 @@ export async function GET() {
 // POST handler to update social media data
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { instagram, facebook, twitter } = body;
-
+    const { instagram, facebook, twitter } = await request.json();
+    
     if (!instagram || !facebook || !twitter) {
       return NextResponse.json({ message: 'All social media links are required' }, { status: 400 });
     }
@@ -73,6 +92,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: 'Social media links updated successfully', data: socialData });
   } catch (error) {
     console.error('Error updating social data:', error);
-    return NextResponse.json({ message: 'Error updating social data' }, { status: 500 });
+    return NextResponse.json({ 
+      message: 'Error updating social data', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    }, { status: 500 });
   }
 }

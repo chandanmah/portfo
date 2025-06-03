@@ -10,7 +10,19 @@ interface ContactData {
   emailRouting: string; // Where contact form emails should be sent
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'contactData.json');
+// Use environment variables for production or fallback to local file
+const dataFilePath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/contactData.json' 
+  : path.join(process.cwd(), 'data', 'contactData.json');
+
+// Default contact data for production
+const defaultContactData: ContactData = {
+  email: process.env.CONTACT_EMAIL || 'contact@mrmahanta.com',
+  phone: process.env.CONTACT_PHONE || '(314) 555-1234',
+  location: process.env.CONTACT_LOCATION || 'St. Louis, Missouri',
+  studioVisitsText: process.env.CONTACT_STUDIO_VISITS || 'Studio visits are available by appointment. Please contact me to arrange a visit to see my works in person and discuss potential commissions or acquisitions.',
+  emailRouting: process.env.CONTACT_EMAIL_ROUTING || 'contact@mrmahanta.com'
+};
 
 async function ensureDirectoryExists(directoryPath: string) {
   try {
@@ -22,28 +34,36 @@ async function ensureDirectoryExists(directoryPath: string) {
 
 async function readContactData(): Promise<ContactData> {
   try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist, return default structure
-    if (error.code === 'ENOENT') {
-      return {
-        email: 'contact@mrmahanta.com',
-        phone: '(314) 555-1234',
-        location: 'St. Louis, Missouri',
-        studioVisitsText: 'Studio visits are available by appointment. Please contact me to arrange a visit to see my works in person and discuss potential commissions or acquisitions.',
-        emailRouting: 'contact@mrmahanta.com'
-      };
+    if (process.env.NODE_ENV === 'production') {
+      // In production, try to read from temp file or return default data
+      try {
+        const data = await fs.readFile(dataFilePath, 'utf8');
+        return JSON.parse(data);
+      } catch {
+        return defaultContactData;
+      }
     }
-    console.error('Error reading contact data:', error);
-    throw error;
+    await ensureDirectoryExists(path.dirname(dataFilePath));
+    const data = await fs.readFile(dataFilePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return defaultContactData;
   }
 }
 
-async function writeContactData(data: ContactData) {
-  await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+async function writeContactData(data: ContactData): Promise<void> {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      // In production, write to temp directory
+      await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+      return;
+    }
+    await ensureDirectoryExists(path.dirname(dataFilePath));
+    await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error('Error writing contact data:', error);
+    throw error;
+  }
 }
 
 // GET handler to retrieve contact data
@@ -60,10 +80,9 @@ export async function GET() {
 // POST handler to update contact data
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, phone, location, studioVisitsText, emailRouting } = body;
-
-    if (!email || !phone || !location || !emailRouting) {
+    const { email, phone, location, studioVisitsText, emailRouting } = await request.json();
+    
+    if (!email || !phone || !location || !studioVisitsText || !emailRouting) {
       return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
     }
 
@@ -71,7 +90,7 @@ export async function POST(request: NextRequest) {
       email,
       phone,
       location,
-      studioVisitsText: studioVisitsText || '',
+      studioVisitsText,
       emailRouting
     };
 
@@ -79,6 +98,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: 'Contact information updated successfully', data: contactData });
   } catch (error) {
     console.error('Error updating contact data:', error);
-    return NextResponse.json({ message: 'Error updating contact data' }, { status: 500 });
+    return NextResponse.json({ 
+      message: 'Error updating contact data', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    }, { status: 500 });
   }
 }

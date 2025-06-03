@@ -1,15 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { NextRequest, NextResponse } from 'next/server';
 
 interface AuthData {
   hashedPassword?: string;
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'authData.json');
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+// Use environment variable for production or fallback to local file
+const authDataPath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/authData.json' 
+  : path.join(process.cwd(), 'data', 'authData.json');
+const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key';
+
+// For production, use environment variable for password
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
 async function ensureDirectoryExists(directoryPath: string) {
   try {
@@ -21,76 +27,71 @@ async function ensureDirectoryExists(directoryPath: string) {
 
 async function readAuthData(): Promise<AuthData> {
   try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist, return empty structure
-    if ((error as { code?: string }).code === 'ENOENT') {
-      return {};
+    if (process.env.NODE_ENV === 'production' && ADMIN_PASSWORD_HASH) {
+      return { hashedPassword: ADMIN_PASSWORD_HASH };
     }
-    console.error('Error reading auth data:', error);
-    throw error;
+    await ensureDirectoryExists(path.dirname(authDataPath));
+    const data = await fs.promises.readFile(authDataPath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return {};
   }
 }
 
-async function writeAuthData(data: AuthData) {
-  await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+async function writeAuthData(data: AuthData): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    // In production, we can't write to file system
+    // Password should be set via environment variable
+    return;
+  }
+  await ensureDirectoryExists(path.dirname(authDataPath));
+  await fs.promises.writeFile(authDataPath, JSON.stringify(data, null, 2));
 }
 
 // POST handler for login and password setup
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { password, action } = body;
-
+    const { action, password } = await request.json();
+    
     if (!password) {
       return NextResponse.json({ message: 'Password is required' }, { status: 400 });
     }
 
-    const authData = await readAuthData();
-
     if (action === 'setup') {
-      // Setup password (only if no password exists)
+      // In production, prevent password setup via API
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json({ message: 'Password setup not allowed in production. Use environment variables.' }, { status: 403 });
+      }
+      
+      const authData = await readAuthData();
       if (authData.hashedPassword) {
         return NextResponse.json({ message: 'Password already exists' }, { status: 400 });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 12);
+      const hashedPassword = await bcrypt.hash(password, 10);
       await writeAuthData({ hashedPassword });
       
-      const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '24h' });
-      
-      return NextResponse.json({ 
-        message: 'Password setup successful', 
-        token,
-        setupComplete: true 
+      const token = jwt.sign({ authenticated: true }, JWT_SECRET, { expiresIn: '24h' });
+      return NextResponse.json({
+        message: 'Password set successfully',
+        token
       });
-    } else {
-      // Login
-      if (!authData.hashedPassword) {
-        return NextResponse.json({ 
-          message: 'Password not set up yet', 
-          setupRequired: true 
-        }, { status: 401 });
-      }
-
-      const isValid = await bcrypt.compare(password, authData.hashedPassword);
+    } else if (action === 'login') {
+      const authData = await readAuthData();
+      const isValid = authData.hashedPassword && await bcrypt.compare(password, authData.hashedPassword);
       
       if (!isValid) {
         return NextResponse.json({ message: 'Invalid password' }, { status: 401 });
       }
 
-      const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '24h' });
-      
-      return NextResponse.json({ 
-        message: 'Login successful', 
-        token 
+      const token = jwt.sign({ authenticated: true }, JWT_SECRET, { expiresIn: '24h' });
+      return NextResponse.json({
+        message: 'Login successful',
+        token
       });
     }
   } catch (error) {
-    console.error('Error in auth:', error);
+    console.error('Authentication error:', error);
     return NextResponse.json({ message: 'Authentication error' }, { status: 500 });
   }
 }
