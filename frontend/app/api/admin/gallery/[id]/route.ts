@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { put } from '@vercel/blob';
+import { put, head } from '@vercel/blob';
 
 interface GalleryImage {
   id: string;
@@ -12,22 +12,47 @@ const GALLERY_CONFIG_KEY = 'gallery-config.json';
 
 // Helper function to get gallery data from Vercel Blob
 async function readGalleryData(): Promise<{ galleryImages: GalleryImage[] }> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    console.warn('BLOB_READ_WRITE_TOKEN is not set. Gallery functionality might be limited.');
+    return { galleryImages: [] };
+  }
+
   try {
-    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : 'http://localhost:3000'}/${GALLERY_CONFIG_KEY}`);
+    const headResult = await head(GALLERY_CONFIG_KEY, { token });
+    const response = await fetch(headResult.url);
+
     if (response.ok) {
       return await response.json();
     }
+    if (response.status === 404) {
+      console.log(`Gallery config file '${GALLERY_CONFIG_KEY}' not found.`);
+      return { galleryImages: [] };
+    }
+    console.error(`Error fetching gallery config: ${response.status} ${response.statusText}`);
+    return { galleryImages: [] };
   } catch (error) {
-    console.log('No gallery data found');
+    if ((error.status && error.status === 404) || (error.message && error.message.toLowerCase().includes('does not exist'))) {
+        console.log(`Gallery config file '${GALLERY_CONFIG_KEY}' not found in blob storage.`);
+        return { galleryImages: [] };
+    }
+    console.error('Error in readGalleryData:', error);
+    return { galleryImages: [] };
   }
-  return { galleryImages: [] };
 }
 
 // Helper function to save gallery data to Vercel Blob
 async function writeGalleryData(data: { galleryImages: GalleryImage[] }): Promise<void> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    console.error('BLOB_READ_WRITE_TOKEN is not set. Cannot save gallery data.');
+    return;
+  }
   await put(GALLERY_CONFIG_KEY, JSON.stringify(data), {
     access: 'public',
     contentType: 'application/json',
+    token: token,
+    allowOverwrite: true, // Allow overwriting the config file
   });
 }
 
