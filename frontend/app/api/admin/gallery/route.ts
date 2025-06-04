@@ -1,69 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { getGalleryData, saveGalleryData, addGalleryImage, removeGalleryImage, type GalleryImage } from '@/lib/fileStorage';
+import { getStorageService } from '@/lib/cloudStorage';
+import jwt from 'jsonwebtoken';
 
-interface GalleryImage {
-  id: string;
-  name: string;
-  subtitle: string;
-  imageUrl: string;
+// Generate unique ID for gallery images
+function generateId(): string {
+  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
-interface GalleryData {
-  galleryImages: GalleryImage[];
-}
-
-// Use environment variables for production or fallback to local file
-const dataFilePath = process.env.NODE_ENV === 'production' 
-  ? '/tmp/galleryData.json' 
-  : path.join(process.cwd(), 'data', 'galleryData.json');
-const publicUploadsGalleryDir = process.env.NODE_ENV === 'production'
-  ? '/tmp/uploads'
-  : path.join(process.cwd(), 'public', 'uploads', 'gallery');
-
-// Default gallery data for production
-const defaultGalleryData: GalleryData = {
-  galleryImages: []
-};
-
-async function ensureDirectoryExists(directoryPath: string) {
+async function getGalleryData(): Promise<GalleryImage[]> {
   try {
-    await fs.access(directoryPath);
+    await ensureDatabaseInitialized();
+    const images = await db.select().from(galleryImages).orderBy(galleryImages.createdAt);
+    return images;
   } catch (error) {
-    await fs.mkdir(directoryPath, { recursive: true });
+    console.error('Error reading gallery data:', error);
+    return [];
   }
 }
 
-async function readGalleryData(): Promise<GalleryData> {
+async function addGalleryImage(imageData: Omit<GalleryImage, 'id'>): Promise<GalleryImage> {
   try {
-    if (process.env.NODE_ENV === 'production') {
-      // In production, try to read from temp file or return default data
-      try {
-        const data = await fs.promises.readFile(dataFilePath, 'utf8');
-        return JSON.parse(data);
-      } catch {
-        return defaultGalleryData;
-      }
-    }
-    await ensureDirectoryExists(path.dirname(dataFilePath));
-    const data = await fs.promises.readFile(dataFilePath, 'utf8');
-    return JSON.parse(data);
+    await ensureDatabaseInitialized();
+    const [newImage] = await db.insert(galleryImages)
+      .values({
+        url: imageData.url,
+        name: imageData.name,
+        subtitle: imageData.subtitle || null,
+      })
+      .returning();
+    return newImage;
   } catch (error) {
-    return defaultGalleryData;
-  }
-}
-
-async function writeGalleryData(data: GalleryData): Promise<void> {
-  try {
-    if (process.env.NODE_ENV === 'production') {
-      // In production, write to temp directory
-      await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2));
-      return;
-    }
-    await ensureDirectoryExists(path.dirname(dataFilePath));
-    await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error('Error writing gallery data:', error);
+    console.error('Error adding gallery image:', error);
     throw error;
   }
 }
@@ -71,52 +39,69 @@ async function writeGalleryData(data: GalleryData): Promise<void> {
 // GET handler to retrieve all gallery images
 export async function GET() {
   try {
-    const data = await readGalleryData();
+    const data = await getGalleryData();
     return NextResponse.json(data);
   } catch (error) {
-    return NextResponse.json({ message: 'Error reading gallery data' }, { status: 500 });
+    console.error('Error fetching gallery data:', error);
+    return NextResponse.json(
+      { message: 'Failed to fetch gallery data' },
+      { status: 500 }
+    );
   }
 }
 
-// POST handler to upload a new gallery image
+// POST handler to upload new gallery images
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
-    const file = formData.get('galleryImage') as File | null;
-    // const title = formData.get('title') as string | null;
-    // const description = formData.get('description') as string | null;
+    const files = formData.getAll('images') as File[];
 
-    if (!file) {
-      return NextResponse.json({ message: 'No gallery image file provided' }, { status: 400 });
+    if (!files || files.length === 0) {
+      return NextResponse.json(
+        { message: 'No files provided' },
+        { status: 400 }
+      );
     }
 
-    await ensureDirectoryExists(publicUploadsGalleryDir);
+    const storageService = getStorageService();
+    const uploadedImages: GalleryImage[] = [];
 
-    const fileExtension = path.extname(file.name);
-    const timestamp = Date.now();
-    const uniqueFileName = `gallery-${timestamp}${fileExtension}`;
-    const filePath = path.join(publicUploadsGalleryDir, uniqueFileName);
-    const publicPath = `/uploads/gallery/${uniqueFileName}`;
+    for (const file of files) {
+      try {
+        const uploadResult = await storageService.upload(file, 'gallery');
+        
+        const newImage: GalleryImage = {
+          id: generateId(),
+          url: uploadResult.url,
+          name: uploadResult.originalName,
+          subtitle: ''
+        };
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    await fs.writeFile(filePath, buffer);
+        await addGalleryImage(newImage);
+        uploadedImages.push(newImage);
+      } catch (uploadError) {
+        console.error('Error uploading file:', uploadError);
+        // Continue with other files even if one fails
+      }
+    }
 
-    const data = await readGalleryData();
-    const newImage: GalleryImage = {
-      id: uniqueFileName, // Using filename as ID for simplicity
-      url: publicPath,
-      name: file.name,
-      // title: title || '',
-      // description: description || '',
-    };
-    data.galleryImages.push(newImage);
-    await writeGalleryData(data);
+    if (uploadedImages.length === 0) {
+      return NextResponse.json(
+        { message: 'Failed to upload any images' },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json({ message: 'Gallery image uploaded successfully', image: newImage });
+    return NextResponse.json({
+      message: `Successfully uploaded ${uploadedImages.length} image(s)`,
+      images: uploadedImages
+    });
   } catch (error) {
-    console.error('Error uploading gallery image:', error);
-    return NextResponse.json({ message: 'Error uploading gallery image', error: error.message }, { status: 500 });
+    console.error('Error in gallery POST:', error);
+    return NextResponse.json(
+      { message: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
@@ -127,34 +112,43 @@ export async function DELETE(request: NextRequest) {
     const imageId = searchParams.get('id');
 
     if (!imageId) {
-      return NextResponse.json({ message: 'Image ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { message: 'Image ID is required' },
+        { status: 400 }
+      );
     }
 
-    const data = await readGalleryData();
-    const imageIndex = data.galleryImages.findIndex(img => img.id === imageId);
+    // Get image data before deletion
+    const galleryData = await getGalleryData();
+    const imageToDelete = galleryData.galleryImages.find(img => img.id === imageId);
 
-    if (imageIndex === -1) {
-      return NextResponse.json({ message: 'Image not found' }, { status: 404 });
+    if (!imageToDelete) {
+      return NextResponse.json(
+        { message: 'Image not found' },
+        { status: 404 }
+      );
     }
 
-    const imageToDelete = data.galleryImages[imageIndex];
-
-    // Delete the physical file
-    const imagePath = path.join(process.cwd(), 'public', imageToDelete.url);
+    // Delete from cloud storage
+    const storageService = getStorageService();
     try {
-        await fs.access(imagePath);
-        await fs.unlink(imagePath);
-    } catch (e) {
-        console.warn(`Could not delete image file ${imagePath}:`, e.message);
-        // Continue to remove from JSON even if file deletion fails
+      await storageService.delete(imageToDelete.url);
+    } catch (storageError) {
+      console.error('Error deleting from cloud storage:', storageError);
+      // Continue with file deletion even if cloud storage fails
     }
 
-    data.galleryImages.splice(imageIndex, 1);
-    await writeGalleryData(data);
+    // Delete from file storage
+    await removeGalleryImage(imageId);
 
-    return NextResponse.json({ message: 'Gallery image deleted successfully' });
+    return NextResponse.json({
+      message: 'Image deleted successfully'
+    });
   } catch (error) {
     console.error('Error deleting gallery image:', error);
-    return NextResponse.json({ message: 'Error deleting gallery image', error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { message: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

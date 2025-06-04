@@ -18,7 +18,7 @@ async function readGalleryData(): Promise<{ galleryImages: GalleryImage[] }> {
     const jsonData = await fs.readFile(dataFilePath, 'utf-8');
     return JSON.parse(jsonData);
   } catch (error) {
-    if (error.code === 'ENOENT') {
+    if ((error as { code: string }).code === 'ENOENT') {
       // If galleryData.json doesn't exist, create it with an empty array
       await fs.writeFile(dataFilePath, JSON.stringify({ galleryImages: [] }, null, 2));
       return { galleryImages: [] };
@@ -66,6 +66,6 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ message: 'Image details updated successfully', image: data.galleryImages[imageIndex] });
   } catch (error) {
     console.error('Error updating gallery image details:', error);
-    return NextResponse.json({ message: 'Error updating gallery image details', error: error.message }, { status: 500 });
+    return NextResponse.json({ message: 'Error updating gallery image details', error: (error as Error).message }, { status: 500 });
   }
 }
