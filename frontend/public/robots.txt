@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Disallow admin routes
+Disallow: /admin_CM/
+Disallow: /admin-login/
+Disallow: /api/admin/
+
+# Optional: Add your sitemap
+# Sitemap: https://your-domain.com/sitemap.xml

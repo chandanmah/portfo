@@ -1,12 +1,7 @@
-'use client'
+"use client";
 
 import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
-import { Trash2, Edit2, Save, X, Upload, Image as ImageIcon, Lock, Mail, Phone, MapPin, Instagram, Facebook, Twitter, Eye, EyeOff } from 'lucide-react';
-import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 
 interface AvatarData {
   avatarUrl: string;
@@ -16,36 +11,16 @@ interface GalleryImage {
   id: string;
   url: string;
   name: string;
-  subtitle?: string;
+  subtitle?: string; // Added subtitle
 }
 
 interface GalleryData {
   galleryImages: GalleryImage[];
 }
 
-interface ContactData {
-  email: string;
-  phone: string;
-  location: string;
-  studioVisitsText: string;
-  emailRouting: string;
-}
-
-interface SocialMediaData {
-  instagram: string;
-  facebook: string;
-  twitter: string;
-}
-
 export default function AdminArtManagementPage() {
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [password, setPassword] = useState<string>('');
-  const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [authMessage, setAuthMessage] = useState<string>('');
-  const [setupRequired, setSetupRequired] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-
+  const router = useRouter();
+  
   // Avatar State
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>('');
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
@@ -53,136 +28,60 @@ export default function AdminArtManagementPage() {
 
   // Gallery State
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
-  const [selectedGalleryFiles, setSelectedGalleryFiles] = useState<File[]>([]);
+  const [selectedGalleryFiles, setSelectedGalleryFiles] = useState<File[]>([]); // Changed to handle multiple files
   const [galleryUploadMessage, setGalleryUploadMessage] = useState<string>('');
   const [galleryErrorMessage, setGalleryErrorMessage] = useState<string>('');
+  // State for editing image details
   const [editingImageId, setEditingImageId] = useState<string | null>(null);
-  const [editingImageName, setEditingImageName] = useState<string>('');
-  const [editingImageSubtitle, setEditingImageSubtitle] = useState<string>('');
-
-  // Contact State
-  const [contactData, setContactData] = useState<ContactData>({
-    email: '',
-    phone: '',
-    location: '',
-    studioVisitsText: '',
-    emailRouting: ''
-  });
-  const [contactMessage, setContactMessage] = useState<string>('');
-
-  // Social Media State
-  const [socialData, setSocialData] = useState<SocialMediaData>({
-    instagram: '',
-    facebook: '',
-    twitter: ''
-  });
-  const [socialMessage, setSocialMessage] = useState<string>('');
-
-  // Check authentication status on component mount
-  useEffect(() => {
-    checkAuthStatus();
-  }, []);
-
-  // Load data after authentication
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchAvatarData();
-      fetchGalleryData();
-      fetchContactData();
-      fetchSocialData();
-    }
-  }, [isAuthenticated]);
-
-  const checkAuthStatus = async () => {
-    try {
-      const token = localStorage.getItem('adminToken');
-      if (token) {
-        // Verify token with backend
-        const response = await fetch('/api/admin/auth', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        
-        if (response.ok) {
-          setIsAuthenticated(true);
-        } else {
-          localStorage.removeItem('adminToken');
-        }
-      }
-      
-      // Check if setup is required
-      const authResponse = await fetch('/api/admin/auth');
-      const authData = await authResponse.json();
-      setSetupRequired(authData.setupRequired);
-    } catch (error) {
-      console.error('Error checking auth status:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleAuth = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await fetch('/api/admin/auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          password,
-          action: setupRequired ? 'setup' : 'login'
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        localStorage.setItem('adminToken', data.token);
-        setIsAuthenticated(true);
-        setAuthMessage(data.message);
-        setPassword('');
-        if (data.setupComplete) {
-          setSetupRequired(false);
-        }
-      } else {
-        setAuthMessage(data.message);
-      }
-    } catch (error) {
-      setAuthMessage('Authentication failed. Please try again.');
-    }
-  };
+  const [editText, setEditText] = useState<{ name: string; subtitle: string }>({ name: '', subtitle: '' });
 
   const handleLogout = () => {
-    localStorage.removeItem('adminToken');
-    setIsAuthenticated(false);
-    setPassword('');
-    setAuthMessage('');
+    document.cookie = 'admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    router.push('/');
   };
 
-  // Avatar Functions
-  const fetchAvatarData = async () => {
+  // Fetch initial data
+  useEffect(() => {
+    fetchAvatar();
+    fetchGalleryImages();
+  }, []);
+
+  const fetchAvatar = async () => {
     try {
       const response = await fetch('/api/admin/avatar');
-      if (response.ok) {
-        const data: AvatarData = await response.json();
-        setCurrentAvatarUrl(data.avatarUrl || '');
-      }
+      if (!response.ok) throw new Error('Failed to fetch avatar');
+      const data: AvatarData = await response.json();
+      setCurrentAvatarUrl(data.avatarUrl || '');
     } catch (error) {
-      console.error('Error fetching avatar data:', error);
+      console.error('Error fetching avatar:', error);
+      setAvatarUploadMessage('Error fetching avatar.');
     }
   };
 
+  const fetchGalleryImages = async () => {
+    try {
+      const response = await fetch('/api/admin/gallery');
+      if (!response.ok) throw new Error('Failed to fetch gallery images');
+      const data: GalleryData = await response.json();
+      setGalleryImages(data.galleryImages || []);
+    } catch (error) {
+      console.error('Error fetching gallery images:', error);
+      setGalleryErrorMessage('Error fetching gallery images.');
+    }
+  };
+
+  // Avatar Handlers
   const handleAvatarFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedAvatarFile(e.target.files[0]);
+      setAvatarUploadMessage('');
     }
   };
 
-  const handleAvatarUpload = async () => {
+  const handleAvatarUpload = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     if (!selectedAvatarFile) {
-      setAvatarUploadMessage('Please select an avatar file first.');
+      setAvatarUploadMessage('Please select an avatar image.');
       return;
     }
 
@@ -190,616 +89,250 @@ export default function AdminArtManagementPage() {
     formData.append('avatar', selectedAvatarFile);
 
     try {
+      setAvatarUploadMessage('Uploading avatar...');
       const response = await fetch('/api/admin/avatar', {
         method: 'POST',
         body: formData,
       });
-
       const result = await response.json();
-
-      if (response.ok) {
-        setAvatarUploadMessage('Avatar uploaded successfully!');
-        setCurrentAvatarUrl(result.avatarUrl);
-        setSelectedAvatarFile(null);
-        const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
-        if (fileInput) fileInput.value = '';
-      } else {
-        setAvatarUploadMessage(result.message || 'Failed to upload avatar.');
-      }
+      if (!response.ok) throw new Error(result.message || 'Failed to upload avatar');
+      setAvatarUploadMessage(result.message);
+      setCurrentAvatarUrl(result.avatarUrl);
+      setSelectedAvatarFile(null);
+      // Clear the file input if possible (might need a ref or reset form)
+      const avatarInput = document.getElementById('avatarInput') as HTMLInputElement;
+      if(avatarInput) avatarInput.value = '';
     } catch (error) {
-      setAvatarUploadMessage('Error uploading avatar.');
+      console.error('Error uploading avatar:', error);
+      setAvatarUploadMessage(error instanceof Error ? error.message : 'Error uploading avatar.');
     }
   };
 
-  // Gallery Functions
-  const fetchGalleryData = async () => {
-    try {
-      const response = await fetch('/api/admin/gallery');
-      if (response.ok) {
-        const data: GalleryData = await response.json();
-        setGalleryImages(data.galleryImages || []);
-      }
-    } catch (error) {
-      console.error('Error fetching gallery data:', error);
-    }
-  };
-
-  const handleGalleryFilesChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setSelectedGalleryFiles(Array.from(e.target.files));
-    }
-  };
-
-  const handleGalleryUpload = async () => {
-    if (selectedGalleryFiles.length === 0) {
-      setGalleryErrorMessage('Please select at least one image file.');
-      return;
-    }
-
-    const formData = new FormData();
-    selectedGalleryFiles.forEach((file) => {
-      formData.append('images', file);
-    });
-
-    try {
-      const response = await fetch('/api/admin/gallery', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        setGalleryUploadMessage(`${selectedGalleryFiles.length} image(s) uploaded successfully!`);
-        setGalleryErrorMessage('');
-        fetchGalleryData();
-        setSelectedGalleryFiles([]);
-        const fileInput = document.getElementById('gallery-upload') as HTMLInputElement;
-        if (fileInput) fileInput.value = '';
-      } else {
-        setGalleryErrorMessage(result.message || 'Failed to upload images.');
-        setGalleryUploadMessage('');
-      }
-    } catch (error) {
-      setGalleryErrorMessage('Error uploading images.');
+  // Gallery Handlers
+  const handleGalleryFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setSelectedGalleryFiles(Array.from(e.target.files)); // Store all selected files
+      setGalleryUploadMessage(`${e.target.files.length} file(s) selected.`);
+    } else {
+      setSelectedGalleryFiles([]);
       setGalleryUploadMessage('');
     }
   };
 
-  const handleEditImage = (image: GalleryImage) => {
-    setEditingImageId(image.id);
-    setEditingImageName(image.name);
-    setEditingImageSubtitle(image.subtitle || '');
+  const handleGalleryImageUpload = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (selectedGalleryFiles.length === 0) {
+      setGalleryUploadMessage('Please select one or more gallery images.');
+      return;
+    }
+
+    setGalleryUploadMessage(`Uploading ${selectedGalleryFiles.length} image(s)...`);
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const file of selectedGalleryFiles) {
+      const formData = new FormData();
+      formData.append('galleryImage', file);
+      // Potentially add name and subtitle here if provided at upload time
+      // formData.append('name', file.name); // Default name
+      // formData.append('subtitle', ''); // Default empty subtitle
+
+      try {
+        const response = await fetch('/api/admin/gallery', {
+          method: 'POST',
+          body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || `Failed to upload ${file.name}`);
+        setGalleryImages(prevImages => [...prevImages, result.image]);
+        successCount++;
+      } catch (error) {
+        console.error(`Error uploading ${file.name}:`, error);
+        errorCount++;
+        // Optionally, accumulate error messages
+        setGalleryErrorMessage(prev => prev + `Error uploading ${file.name}. `);
+      }
+    }
+
+    let finalMessage = '';
+    if (successCount > 0) finalMessage += `${successCount} image(s) uploaded successfully. `;
+    if (errorCount > 0) finalMessage += `${errorCount} image(s) failed to upload.`;
+    setGalleryUploadMessage(finalMessage.trim() || 'Upload process finished.');
+    
+    setSelectedGalleryFiles([]);
+    const galleryInput = document.getElementById('galleryInput') as HTMLInputElement;
+    if(galleryInput) galleryInput.value = ''; // Clear file input
   };
 
-  const handleSaveImageEdit = async () => {
-    if (!editingImageId) return;
-
-    try {
-      const response = await fetch(`/api/admin/gallery/${editingImageId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: editingImageName,
-          subtitle: editingImageSubtitle,
-        }),
-      });
-
-      if (response.ok) {
-        fetchGalleryData();
-        setEditingImageId(null);
-        setEditingImageName('');
-        setEditingImageSubtitle('');
-      }
-    } catch (error) {
-      console.error('Error updating image:', error);
-    }
+    const handleEditImage = (image: GalleryImage) => {
+    setEditingImageId(image.id);
+    setEditText({ name: image.name, subtitle: image.subtitle || '' });
   };
 
   const handleCancelEdit = () => {
     setEditingImageId(null);
-    setEditingImageName('');
-    setEditingImageSubtitle('');
+    setEditText({ name: '', subtitle: '' });
   };
 
-  const handleDeleteImage = async (imageId: string) => {
-    if (!confirm('Are you sure you want to delete this image?')) return;
+  const handleSaveEdit = async () => {
+    if (!editingImageId) return;
 
     try {
-      const response = await fetch(`/api/admin/gallery/${imageId}`, {
+      setGalleryUploadMessage('Updating image details...');
+      // Ensure the API endpoint matches your backend route for updating, e.g., /api/admin/gallery/[id]
+      const response = await fetch(`/api/admin/gallery/${editingImageId}`, { 
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(editText),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text(); // Get raw text for error diagnosis
+        console.error('Server error response:', errorText);
+        throw new Error(`Server responded with ${response.status}: ${errorText.substring(0, 100)}...`); // Show first 100 chars
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const result = await response.json();
+        setGalleryImages(prevImages => 
+          prevImages.map(img => 
+            img.id === editingImageId ? { ...img, name: editText.name, subtitle: editText.subtitle } : img
+          )
+        );
+        setGalleryUploadMessage(result.message || 'Image details updated successfully.');
+        handleCancelEdit(); // Reset editing state
+      } else {
+        const responseText = await response.text();
+        console.error('Non-JSON response received:', responseText);
+        throw new Error('Received non-JSON response from server. Check console for details.');
+      }
+    } catch (error) {
+      console.error('Error updating image details:', error);
+      setGalleryErrorMessage(error instanceof Error ? error.message : 'Error updating image details. Check console for more info.');
+    }
+  };
+
+const handleGalleryImageDelete = async (imageId: string) => {
+    if (!confirm('Are you sure you want to delete this image?')) return;
+    try {
+      setGalleryErrorMessage('');
+      const response = await fetch(`/api/admin/gallery?id=${imageId}`, {
         method: 'DELETE',
       });
-
-      if (response.ok) {
-        fetchGalleryData();
-      }
-    } catch (error) {
-      console.error('Error deleting image:', error);
-    }
-  };
-
-  // Contact Functions
-  const fetchContactData = async () => {
-    try {
-      const response = await fetch('/api/admin/contact');
-      if (response.ok) {
-        const data: ContactData = await response.json();
-        setContactData(data);
-      }
-    } catch (error) {
-      console.error('Error fetching contact data:', error);
-    }
-  };
-
-  const handleContactUpdate = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await fetch('/api/admin/contact', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(contactData),
-      });
-
       const result = await response.json();
-
-      if (response.ok) {
-        setContactMessage('Contact information updated successfully!');
-      } else {
-        setContactMessage(result.message || 'Failed to update contact information.');
-      }
+      if (!response.ok) throw new Error(result.message || 'Failed to delete gallery image');
+      setGalleryImages(prevImages => prevImages.filter(img => img.id !== imageId));
+      alert(result.message);
     } catch (error) {
-      setContactMessage('Error updating contact information.');
+      console.error('Error deleting gallery image:', error);
+      setGalleryErrorMessage(error instanceof Error ? error.message : 'Error deleting gallery image.');
     }
   };
 
-  // Social Media Functions
-  const fetchSocialData = async () => {
-    try {
-      const response = await fetch('/api/admin/social');
-      if (response.ok) {
-        const data: SocialMediaData = await response.json();
-        setSocialData(data);
-      }
-    } catch (error) {
-      console.error('Error fetching social data:', error);
-    }
-  };
-
-  const handleSocialUpdate = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await fetch('/api/admin/social', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(socialData),
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        setSocialMessage('Social media links updated successfully!');
-      } else {
-        setSocialMessage(result.message || 'Failed to update social media links.');
-      }
-    } catch (error) {
-      setSocialMessage('Error updating social media links.');
-    }
-  };
-
-  // Styles
-  const inputStyle = "w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent";
-  const buttonStyle = "px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium";
-  const cardStyle = "bg-white rounded-xl shadow-lg border border-gray-200";
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <Card className={`w-full max-w-md ${cardStyle}`}>
-          <CardHeader className="text-center pb-4">
-            <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
-              <Lock className="h-8 w-8 text-blue-600" />
-            </div>
-            <CardTitle className="text-2xl font-bold text-gray-800">
-              {setupRequired ? 'Setup Admin Password' : 'Admin Login'}
-            </CardTitle>
-            <p className="text-gray-600 mt-2">
-              {setupRequired 
-                ? 'Set up your admin password to secure the dashboard'
-                : 'Enter your password to access the admin dashboard'
-              }
-            </p>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleAuth} className="space-y-4">
-              <div className="relative">
-                <Input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder={setupRequired ? 'Create admin password' : 'Enter password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className={inputStyle}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
-              </div>
-              <Button type="submit" className={`w-full ${buttonStyle}`}>
-                {setupRequired ? 'Setup Password' : 'Login'}
-              </Button>
-            </form>
-            {authMessage && (
-              <div className={`mt-4 p-3 rounded-lg text-center ${
-                authMessage.includes('successful') || authMessage.includes('setup')
-                  ? 'bg-green-100 text-green-700 border border-green-200'
-                  : 'bg-red-100 text-red-700 border border-red-200'
-              }`}>
-                {authMessage}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const inputStyle = "mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-black";
+  const buttonStyle = "mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500";
+  const sectionStyle = "mb-12 p-6 bg-white shadow-lg rounded-lg";
+  const imagePreviewStyle = "mt-4 max-w-xs max-h-64 object-contain border border-gray-200 rounded";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-800 mb-2">Admin Dashboard</h1>
-            <p className="text-gray-600">Manage your portfolio content and settings</p>
-          </div>
-          <Button onClick={handleLogout} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg">
+    <div className="min-h-screen bg-gray-100 p-4 md:p-8 text-gray-800">
+      <header className="mb-10 flex justify-between items-center">
+        <h1 className="text-4xl font-bold text-gray-700">Manage Your Artworks</h1>
+        <div className="flex gap-4">
+          <button
+            onClick={() => router.push('/')}
+            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+          >
+            View Site
+          </button>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+          >
             Logout
-          </Button>
+          </button>
         </div>
+      </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Avatar Management */}
-          <Card className={cardStyle}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl font-semibold text-gray-800">
-                <ImageIcon className="h-6 w-6 text-blue-600" />
-                Avatar Management
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {currentAvatarUrl && (
-                <div className="text-center">
-                  <div className="relative w-32 h-32 mx-auto mb-4">
-                    <Image
-                      src={currentAvatarUrl}
-                      alt="Current Avatar"
-                      fill
-                      className="rounded-full object-cover border-4 border-blue-200"
-                    />
-                  </div>
-                  <p className="text-sm text-gray-600">Current Avatar</p>
-                </div>
-              )}
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload New Avatar
-                </label>
-                <input
-                  id="avatar-upload"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAvatarFileChange}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              <Button onClick={handleAvatarUpload} className={buttonStyle}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Avatar
-              </Button>
-              
-              {avatarUploadMessage && (
-                <div className={`p-3 rounded-lg text-center ${
-                  avatarUploadMessage.includes('successfully')
-                    ? 'bg-green-100 text-green-700 border border-green-200'
-                    : 'bg-red-100 text-red-700 border border-red-200'
-                }`}>
-                  {avatarUploadMessage}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+      {/* Avatar Management Section */}
+      <section className={sectionStyle}>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-600">Update Your Profile Picture</h2>
+        <form onSubmit={handleAvatarUpload}>
+          <div>
+            <label htmlFor="avatarInput" className="block text-sm font-medium text-gray-700">Choose a new profile picture (e.g., a photo of yourself):</label>
+            <input id="avatarInput" type="file" accept="image/*" onChange={handleAvatarFileChange} className={inputStyle} />
+          </div>
+          <button type="submit" className={buttonStyle}>Upload Picture</button>
+        </form>
+        {avatarUploadMessage && <p className={`mt-2 text-sm ${avatarUploadMessage.toLowerCase().includes('error') || avatarUploadMessage.toLowerCase().includes('failed') ? 'text-red-600' : 'text-green-600'}`}>{avatarUploadMessage}</p>}
+        {currentAvatarUrl && (
+          <div className="mt-6">
+            <h3 className="text-lg font-medium text-gray-700">Your Current Profile Picture:</h3>
+            <img src={currentAvatarUrl} alt="Current Avatar" className={imagePreviewStyle} />
+          </div>
+        )}
+      </section>
 
-          {/* Contact Information Management */}
-          <Card className={cardStyle}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl font-semibold text-gray-800">
-                <Mail className="h-6 w-6 text-blue-600" />
-                Contact Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleContactUpdate} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email Address
-                  </label>
-                  <Input
-                    type="email"
-                    value={contactData.email}
-                    onChange={(e) => setContactData({...contactData, email: e.target.value})}
-                    className={inputStyle}
-                    required
+      {/* Gallery Management Section */}
+      <section className={sectionStyle}>
+        <h2 className="text-2xl font-semibold mb-4 text-gray-600">Manage Your Paintings</h2>
+        <form onSubmit={handleGalleryImageUpload}>
+          <div>
+            <label htmlFor="galleryInput" className="block text-sm font-medium text-gray-700">Add a new painting to your gallery:</label>
+            <input id="galleryInput" type="file" accept="image/*" onChange={handleGalleryFileChange} className={inputStyle} multiple />
+          </div>
+          <button type="submit" className={buttonStyle}>Upload Painting</button>
+        </form>
+        {galleryUploadMessage && <p className={`mt-2 text-sm ${galleryUploadMessage.toLowerCase().includes('error') || galleryUploadMessage.toLowerCase().includes('failed') ? 'text-red-600' : 'text-green-600'}`}>{galleryUploadMessage}</p>}
+        {galleryErrorMessage && <p className="mt-2 text-sm text-red-600">{galleryErrorMessage}</p>}
+
+        <div className="mt-8">
+          <h3 className="text-lg font-medium text-gray-700">Your Current Paintings:</h3>
+          {galleryImages.length === 0 && !galleryErrorMessage && <p className="text-gray-500 mt-2">You haven't added any paintings yet. Use the form above to upload your first one!</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mt-4">
+            {galleryImages.map(image => (
+              editingImageId === image.id ? (
+                // Editing UI
+                <div key={image.id} className="p-4 border border-blue-300 rounded-lg shadow-md bg-blue-50 col-span-1 sm:col-span-1 md:col-span-1 lg:col-span-1">
+                  <img src={image.url} alt={image.name} className={`w-full h-48 object-cover rounded-md mb-2`} />
+                  <input 
+                    type="text" 
+                    value={editText.name}
+                    onChange={(e) => setEditText(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Image Name"
+                    className={`${inputStyle} mb-2`}
                   />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Phone Number
-                  </label>
-                  <Input
-                    type="tel"
-                    value={contactData.phone}
-                    onChange={(e) => setContactData({...contactData, phone: e.target.value})}
-                    className={inputStyle}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Location
-                  </label>
-                  <Input
-                    type="text"
-                    value={contactData.location}
-                    onChange={(e) => setContactData({...contactData, location: e.target.value})}
-                    className={inputStyle}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email Routing (Where contact form emails go)
-                  </label>
-                  <Input
-                    type="email"
-                    value={contactData.emailRouting}
-                    onChange={(e) => setContactData({...contactData, emailRouting: e.target.value})}
-                    className={inputStyle}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Studio Visits Text
-                  </label>
-                  <Textarea
-                    value={contactData.studioVisitsText}
-                    onChange={(e) => setContactData({...contactData, studioVisitsText: e.target.value})}
-                    className={inputStyle}
+                  <textarea 
+                    value={editText.subtitle || ''}
+                    onChange={(e) => setEditText(prev => ({ ...prev, subtitle: e.target.value }))}
+                    placeholder="Subtitle (optional)"
                     rows={3}
+                    className={`${inputStyle} mb-2`}
                   />
-                </div>
-                
-                <Button type="submit" className={buttonStyle}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Update Contact Info
-                </Button>
-              </form>
-              
-              {contactMessage && (
-                <div className={`mt-4 p-3 rounded-lg text-center ${
-                  contactMessage.includes('successfully')
-                    ? 'bg-green-100 text-green-700 border border-green-200'
-                    : 'bg-red-100 text-red-700 border border-red-200'
-                }`}>
-                  {contactMessage}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Social Media Management */}
-          <Card className={cardStyle}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl font-semibold text-gray-800">
-                <Instagram className="h-6 w-6 text-blue-600" />
-                Social Media Links
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSocialUpdate} className="space-y-4">
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-                    <Instagram className="h-4 w-4" />
-                    Instagram URL
-                  </label>
-                  <Input
-                    type="url"
-                    value={socialData.instagram}
-                    onChange={(e) => setSocialData({...socialData, instagram: e.target.value})}
-                    className={inputStyle}
-                    placeholder="https://instagram.com/username"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-                    <Facebook className="h-4 w-4" />
-                    Facebook URL
-                  </label>
-                  <Input
-                    type="url"
-                    value={socialData.facebook}
-                    onChange={(e) => setSocialData({...socialData, facebook: e.target.value})}
-                    className={inputStyle}
-                    placeholder="https://facebook.com/username"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-                    <Twitter className="h-4 w-4" />
-                    Twitter URL
-                  </label>
-                  <Input
-                    type="url"
-                    value={socialData.twitter}
-                    onChange={(e) => setSocialData({...socialData, twitter: e.target.value})}
-                    className={inputStyle}
-                    placeholder="https://twitter.com/username"
-                    required
-                  />
-                </div>
-                
-                <Button type="submit" className={buttonStyle}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Update Social Links
-                </Button>
-              </form>
-              
-              {socialMessage && (
-                <div className={`mt-4 p-3 rounded-lg text-center ${
-                  socialMessage.includes('successfully')
-                    ? 'bg-green-100 text-green-700 border border-green-200'
-                    : 'bg-red-100 text-red-700 border border-red-200'
-                }`}>
-                  {socialMessage}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Gallery Management */}
-          <Card className={`${cardStyle} lg:col-span-2`}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl font-semibold text-gray-800">
-                <ImageIcon className="h-6 w-6 text-blue-600" />
-                Gallery Management
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Upload Section */}
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                <input
-                  id="gallery-upload"
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handleGalleryFilesChange}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 mb-4"
-                />
-                <Button onClick={handleGalleryUpload} className={buttonStyle}>
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Images
-                </Button>
-              </div>
-              
-              {galleryUploadMessage && (
-                <div className="p-3 rounded-lg text-center bg-green-100 text-green-700 border border-green-200">
-                  {galleryUploadMessage}
-                </div>
-              )}
-              
-              {galleryErrorMessage && (
-                <div className="p-3 rounded-lg text-center bg-red-100 text-red-700 border border-red-200">
-                  {galleryErrorMessage}
-                </div>
-              )}
-              
-              {/* Gallery Images */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {galleryImages.map((image) => (
-                  <div key={image.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <div className="relative w-full h-48 mb-4">
-                      <Image
-                        src={image.url}
-                        alt={image.name}
-                        fill
-                        className="rounded-lg object-cover"
-                      />
-                    </div>
-                    
-                    {editingImageId === image.id ? (
-                      <div className="space-y-3">
-                        <Input
-                          value={editingImageName}
-                          onChange={(e) => setEditingImageName(e.target.value)}
-                          placeholder="Image name"
-                          className="text-sm"
-                        />
-                        <Input
-                          value={editingImageSubtitle}
-                          onChange={(e) => setEditingImageSubtitle(e.target.value)}
-                          placeholder="Subtitle (optional)"
-                          className="text-sm"
-                        />
-                        <div className="flex gap-2">
-                          <Button onClick={handleSaveImageEdit} size="sm" className="bg-green-600 hover:bg-green-700">
-                            <Save className="h-3 w-3" />
-                          </Button>
-                          <Button onClick={handleCancelEdit} size="sm" variant="outline">
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <h3 className="font-medium text-gray-800 mb-1">{image.name}</h3>
-                        {image.subtitle && (
-                          <p className="text-sm text-gray-600 mb-3">{image.subtitle}</p>
-                        )}
-                        <div className="flex gap-2">
-                          <Button onClick={() => handleEditImage(image)} size="sm" variant="outline">
-                            <Edit2 className="h-3 w-3" />
-                          </Button>
-                          <Button onClick={() => handleDeleteImage(image.id)} size="sm" className="bg-red-600 hover:bg-red-700">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
+                  <div className="flex space-x-2 mt-2">
+                    <button onClick={handleSaveEdit} className={`${buttonStyle} bg-green-600 hover:bg-green-700 text-xs px-3 py-1.5`}>Save</button>
+                    <button onClick={handleCancelEdit} className={`${buttonStyle} bg-gray-500 hover:bg-gray-600 text-xs px-3 py-1.5`}>Cancel</button>
                   </div>
-                ))}
-              </div>
-              
-              {galleryImages.length === 0 && (
-                <div className="text-center py-12 text-gray-500">
-                  <ImageIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No images uploaded yet. Upload some images to get started!</p>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              ) : (
+                // Display UI
+                <div key={image.id} className="border border-gray-200 rounded-lg p-3 shadow-sm bg-gray-50 hover:shadow-md transition-shadow">
+                  <img src={image.url} alt={image.name || 'Gallery image'} className="w-full h-48 object-cover rounded-md mb-2" />
+                  <h4 className="font-semibold text-sm text-gray-800 truncate mt-1" title={image.name}>{image.name}</h4>
+                  {image.subtitle && <p className="text-xs text-gray-600 mt-1 truncate" title={image.subtitle}>{image.subtitle}</p>}
+                  <div className="mt-3 flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+                    <button onClick={() => handleEditImage(image)} className={`${buttonStyle} bg-yellow-500 hover:bg-yellow-600 text-xs px-3 py-1.5 w-full sm:w-auto`}>Edit</button>
+                    <button onClick={() => handleGalleryImageDelete(image.id)} className={`${buttonStyle} bg-red-500 hover:bg-red-600 text-xs px-3 py-1.5 w-full sm:w-auto`}>Delete</button>
+                  </div>
+                </div>
+              )
+            ))}
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

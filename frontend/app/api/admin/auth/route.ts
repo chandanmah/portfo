@@ -1,124 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { put, del } from '@vercel/blob';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { put, head } from '@vercel/blob';
 
-interface AuthData {
-  hashedPassword?: string;
-}
+const ADMIN_PASSWORD_KEY = 'admin-password';
 
-const AUTH_DATA_KEY = 'auth-data.json';
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-
-async function readAuthData(): Promise<AuthData> {
+// Helper function to get admin password from Vercel Blob
+async function getAdminPassword(): Promise<string | null> {
   try {
-    // Try to fetch from Vercel Blob storage
-    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : ''}/auth-data.json`, {
-      headers: {
-        'Authorization': `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`
-      }
-    });
-    
+    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : 'http://localhost:3000'}/admin-config.json`);
     if (response.ok) {
-      return await response.json();
+      const data = await response.json();
+      return data.adminPassword || null;
     }
-    
-    // If not found, return empty structure
-    return {};
   } catch (error) {
-    console.error('Error reading auth data:', error);
-    return {};
+    console.log('No admin password set yet');
   }
+  return null;
 }
 
-async function writeAuthData(data: AuthData) {
-  try {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    await put(AUTH_DATA_KEY, blob, {
-      access: 'public',
-    });
-  } catch (error) {
-    console.error('Error writing auth data:', error);
-    throw error;
-  }
+// Helper function to set admin password in Vercel Blob
+async function setAdminPassword(password: string): Promise<void> {
+  const config = { adminPassword: password };
+  await put('admin-config.json', JSON.stringify(config), {
+    access: 'public',
+    contentType: 'application/json',
+  });
 }
 
-// POST handler for login and password setup
+// POST handler for login and initial password setup
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { password, action } = body;
+    const { password, isSetup } = await request.json();
 
     if (!password) {
       return NextResponse.json({ message: 'Password is required' }, { status: 400 });
     }
 
-    const authData = await readAuthData();
+    const existingPassword = await getAdminPassword();
 
-    if (action === 'setup') {
-      // Setup password (only if no password exists)
-      if (authData.hashedPassword) {
-        return NextResponse.json({ message: 'Password already exists' }, { status: 400 });
-      }
+    // If this is initial setup and no password exists
+    if (isSetup && !existingPassword) {
+      await setAdminPassword(password);
+      return NextResponse.json({ message: 'Admin password set successfully', isSetup: true });
+    }
 
-      const hashedPassword = await bcrypt.hash(password, 12);
-      await writeAuthData({ hashedPassword });
-      
-      const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '24h' });
-      
-      return NextResponse.json({ 
-        message: 'Password setup successful', 
-        token,
-        setupComplete: true 
-      });
+    // If no password is set yet, require setup
+    if (!existingPassword) {
+      return NextResponse.json({ message: 'Admin password not set. Please set up your password first.', requiresSetup: true }, { status: 401 });
+    }
+
+    // Verify password
+    if (password === existingPassword) {
+      return NextResponse.json({ message: 'Login successful' });
     } else {
-      // Login
-      if (!authData.hashedPassword) {
-        return NextResponse.json({ 
-          message: 'Password not set up yet', 
-          setupRequired: true 
-        }, { status: 401 });
-      }
-
-      const isValid = await bcrypt.compare(password, authData.hashedPassword);
-      
-      if (!isValid) {
-        return NextResponse.json({ message: 'Invalid password' }, { status: 401 });
-      }
-
-      const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '24h' });
-      
-      return NextResponse.json({ 
-        message: 'Login successful', 
-        token 
-      });
+      return NextResponse.json({ message: 'Invalid password' }, { status: 401 });
     }
   } catch (error) {
-    console.error('Error in auth:', error);
-    return NextResponse.json({ message: 'Authentication error' }, { status: 500 });
+    console.error('Auth error:', error);
+    return NextResponse.json({ message: 'Authentication failed' }, { status: 500 });
   }
 }
 
-// GET handler to check auth status
-export async function GET(request: NextRequest) {
+// GET handler to check if admin password is set
+export async function GET() {
   try {
-    const authData = await readAuthData();
-    
-    return NextResponse.json({ 
-      setupRequired: !authData.hashedPassword 
-    });
+    const existingPassword = await getAdminPassword();
+    return NextResponse.json({ isSetup: !!existingPassword });
   } catch (error) {
-    console.error('Error checking auth status:', error);
-    return NextResponse.json({ message: 'Error checking auth status' }, { status: 500 });
-  }
-}
-
-// Utility function to verify JWT token
-export function verifyToken(token: string): boolean {
-  try {
-    jwt.verify(token, JWT_SECRET);
-    return true;
-  } catch (error) {
-    return false;
+    return NextResponse.json({ isSetup: false });
   }
 }
