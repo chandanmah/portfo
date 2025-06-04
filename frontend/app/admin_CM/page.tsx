@@ -164,17 +164,10 @@ export default function AdminArtManagementPage() {
   // Avatar Functions
   const fetchAvatarData = async () => {
     try {
-      const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/avatar', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await fetch('/api/admin/avatar');
       if (response.ok) {
         const data: AvatarData = await response.json();
         setCurrentAvatarUrl(data.avatarUrl || '');
-      } else {
-        console.error('Failed to fetch avatar data:', response.status);
       }
     } catch (error) {
       console.error('Error fetching avatar data:', error);
@@ -197,28 +190,23 @@ export default function AdminArtManagementPage() {
     formData.append('avatar', selectedAvatarFile);
 
     try {
-      const token = localStorage.getItem('adminToken');
       const response = await fetch('/api/admin/avatar', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         body: formData,
       });
 
+      const result = await response.json();
+
       if (response.ok) {
-        const result = await response.json();
         setAvatarUploadMessage('Avatar uploaded successfully!');
         setCurrentAvatarUrl(result.avatarUrl);
         setSelectedAvatarFile(null);
         const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
       } else {
-        const errorData = await response.json().catch(() => ({ message: 'Failed to upload avatar.' }));
-        setAvatarUploadMessage(errorData.message || 'Failed to upload avatar.');
+        setAvatarUploadMessage(result.message || 'Failed to upload avatar.');
       }
     } catch (error) {
-      console.error('Avatar upload error:', error);
       setAvatarUploadMessage('Error uploading avatar.');
     }
   };
@@ -226,17 +214,10 @@ export default function AdminArtManagementPage() {
   // Gallery Functions
   const fetchGalleryData = async () => {
     try {
-      const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/gallery', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await fetch('/api/admin/gallery');
       if (response.ok) {
         const data: GalleryData = await response.json();
         setGalleryImages(data.galleryImages || []);
-      } else {
-        console.error('Failed to fetch gallery data:', response.status);
       }
     } catch (error) {
       console.error('Error fetching gallery data:', error);

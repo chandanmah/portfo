@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
-import { getContactData } from '@/lib/fileStorage';
+import fs from 'fs/promises';
+import path from 'path';
+
+interface ContactData {
+  emailRouting: string;
+}
+
+const contactDataFilePath = path.join(process.cwd(), 'data', 'contactData.json');
 
 async function getEmailRouting(): Promise<string> {
   try {
-    const contactData = await getContactData();
-    return contactData.emailRouting || 'contact@mrmahanta.com';
+    const jsonData = await fs.readFile(contactDataFilePath, 'utf-8');
+    const data: ContactData = JSON.parse(jsonData);
+    return data.emailRouting || 'contact@mrmahanta.com';
   } catch (error) {
     // If file doesn't exist, return default email
     return 'contact@mrmahanta.com';
