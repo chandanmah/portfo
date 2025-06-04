@@ -5,14 +5,29 @@ const ADMIN_PASSWORD_KEY = 'admin-password';
 
 // Helper function to get admin password from Vercel Blob
 async function getAdminPassword(): Promise<string | null> {
+  const configPathname = 'admin-config.json';
   try {
-    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : 'http://localhost:3000'}/admin-config.json`);
+    // Check if the config file exists using head(). The SDK handles the base URL.
+    const blobHead = await head(configPathname, { token: process.env.BLOB_READ_WRITE_TOKEN });
+
+    // If it exists, fetch its content using its direct URL from the head result
+    const response = await fetch(blobHead.url, { // Use blobHead.url which is the direct, token-less URL
+      // No explicit Authorization header needed here if blobHead.url is already the public (or signed) URL
+    });
+
     if (response.ok) {
       const data = await response.json();
       return data.adminPassword || null;
     }
+    console.error('Failed to fetch admin password, status:', response.status, 'URL:', blobHead.url);
   } catch (error) {
-    console.log('No admin password set yet');
+    // head() throws an error if the blob doesn't exist (typically a 404-like error)
+    // Or if there's a network/auth issue with the head request itself.
+    if (error && error.message && error.message.includes('404')) { // More robust check for 404 from head
+      console.log('Admin config file not found (admin-config.json). Password not set.');
+    } else {
+      console.error('Error getting admin password (head or fetch):', error);
+    }
   }
   return null;
 }
@@ -20,10 +35,18 @@ async function getAdminPassword(): Promise<string | null> {
 // Helper function to set admin password in Vercel Blob
 async function setAdminPassword(password: string): Promise<void> {
   const config = { adminPassword: password };
-  await put('admin-config.json', JSON.stringify(config), {
-    access: 'public',
-    contentType: 'application/json',
-  });
+  const configPathname = 'admin-config.json';
+  try {
+    await put(configPathname, JSON.stringify(config), {
+      access: 'public',
+      contentType: 'application/json',
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      allowOverwrite: true, // Allow overwriting the existing config file
+    });
+  } catch (error) {
+    console.error('Error setting admin password in Vercel Blob:', error);
+    throw error; // Re-throw to be caught by the POST handler
+  }
 }
 
 // POST handler for login and initial password setup
