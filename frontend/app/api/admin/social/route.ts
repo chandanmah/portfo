@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { kv } from '@vercel/kv';
 
 interface SocialMediaData {
   instagram: string;
@@ -8,38 +7,21 @@ interface SocialMediaData {
   twitter: string;
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'socialData.json');
+const SOCIAL_KEY = 'social_media_data';
 
-async function ensureDirectoryExists(directoryPath: string) {
-  try {
-    await fs.access(directoryPath);
-  } catch (error) {
-    await fs.mkdir(directoryPath, { recursive: true });
-  }
-}
+const defaultSocialData: SocialMediaData = {
+  instagram: 'https://instagram.com/example',
+  facebook: 'https://facebook.com/example',
+  twitter: 'https://twitter.com/example'
+};
 
 async function readSocialData(): Promise<SocialMediaData> {
-  try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist, return default structure
-    if (error.code === 'ENOENT') {
-      return {
-        instagram: 'https://instagram.com/mrmahanta',
-        facebook: 'https://facebook.com/mrmahanta',
-        twitter: 'https://twitter.com/mrmahanta'
-      };
-    }
-    console.error('Error reading social data:', error);
-    throw error;
-  }
+  const data = await kv.get<SocialMediaData>(SOCIAL_KEY);
+  return data || defaultSocialData;
 }
 
 async function writeSocialData(data: SocialMediaData) {
-  await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+  await kv.set(SOCIAL_KEY, data);
 }
 
 // GET handler to retrieve social media data

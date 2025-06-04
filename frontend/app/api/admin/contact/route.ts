@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { kv } from '@vercel/kv';
 
 interface ContactData {
   email: string;
@@ -10,40 +9,23 @@ interface ContactData {
   emailRouting: string; // Where contact form emails should be sent
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'contactData.json');
+const CONTACT_KEY = 'contact_data';
 
-async function ensureDirectoryExists(directoryPath: string) {
-  try {
-    await fs.access(directoryPath);
-  } catch (error) {
-    await fs.mkdir(directoryPath, { recursive: true });
-  }
-}
+const defaultContactData: ContactData = {
+  email: 'contact@example.com',
+  phone: '(000) 000-0000',
+  location: 'City, Country',
+  studioVisitsText: 'Studio visits are available by appointment.',
+  emailRouting: 'contact@example.com'
+};
 
 async function readContactData(): Promise<ContactData> {
-  try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist, return default structure
-    if (error.code === 'ENOENT') {
-      return {
-        email: 'contact@mrmahanta.com',
-        phone: '(314) 555-1234',
-        location: 'St. Louis, Missouri',
-        studioVisitsText: 'Studio visits are available by appointment. Please contact me to arrange a visit to see my works in person and discuss potential commissions or acquisitions.',
-        emailRouting: 'contact@mrmahanta.com'
-      };
-    }
-    console.error('Error reading contact data:', error);
-    throw error;
-  }
+  const data = await kv.get<ContactData>(CONTACT_KEY);
+  return data || defaultContactData;
 }
 
 async function writeContactData(data: ContactData) {
-  await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+  await kv.set(CONTACT_KEY, data);
 }
 
 // GET handler to retrieve contact data

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { kv } from '@vercel/kv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -8,35 +7,16 @@ interface AuthData {
   hashedPassword?: string;
 }
 
-const dataFilePath = path.join(process.cwd(), 'data', 'authData.json');
+const AUTH_KEY = 'admin_auth_data';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
-async function ensureDirectoryExists(directoryPath: string) {
-  try {
-    await fs.access(directoryPath);
-  } catch (error) {
-    await fs.mkdir(directoryPath, { recursive: true });
-  }
-}
-
 async function readAuthData(): Promise<AuthData> {
-  try {
-    await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-    const jsonData = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(jsonData);
-  } catch (error) {
-    // If file doesn't exist, return empty structure
-    if ((error as { code?: string }).code === 'ENOENT') {
-      return {};
-    }
-    console.error('Error reading auth data:', error);
-    throw error;
-  }
+  const data = await kv.get<AuthData>(AUTH_KEY);
+  return data || {};
 }
 
 async function writeAuthData(data: AuthData) {
-  await ensureDirectoryExists(path.join(process.cwd(), 'data'));
-  await fs.writeFile(dataFilePath, JSON.stringify(data, null, 2));
+  await kv.set(AUTH_KEY, data);
 }
 
 // POST handler for login and password setup
