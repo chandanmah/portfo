@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+import { put, del } from '@vercel/blob';
 
 interface ContactData {
   email: string;
@@ -9,23 +9,52 @@ interface ContactData {
   emailRouting: string; // Where contact form emails should be sent
 }
 
-const CONTACT_KEY = 'contact_data';
-
-const defaultContactData: ContactData = {
-  email: 'contact@example.com',
-  phone: '(000) 000-0000',
-  location: 'City, Country',
-  studioVisitsText: 'Studio visits are available by appointment.',
-  emailRouting: 'contact@example.com'
-};
+const CONTACT_DATA_KEY = 'contact-data.json';
 
 async function readContactData(): Promise<ContactData> {
-  const data = await kv.get<ContactData>(CONTACT_KEY);
-  return data || defaultContactData;
+  try {
+    // Try to fetch from Vercel Blob storage
+    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : ''}/contact-data.json`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`
+      }
+    });
+    
+    if (response.ok) {
+      return await response.json();
+    }
+    
+    // If not found, return default structure
+    return {
+      email: 'contact@mrmahanta.com',
+      phone: '(314) 555-1234',
+      location: 'St. Louis, Missouri',
+      studioVisitsText: 'Studio visits are available by appointment. Please contact me to arrange a visit to see my works in person and discuss potential commissions or acquisitions.',
+      emailRouting: 'contact@mrmahanta.com'
+    };
+  } catch (error) {
+    console.error('Error reading contact data:', error);
+    // Return default structure on error
+    return {
+      email: 'contact@mrmahanta.com',
+      phone: '(314) 555-1234',
+      location: 'St. Louis, Missouri',
+      studioVisitsText: 'Studio visits are available by appointment. Please contact me to arrange a visit to see my works in person and discuss potential commissions or acquisitions.',
+      emailRouting: 'contact@mrmahanta.com'
+    };
+  }
 }
 
 async function writeContactData(data: ContactData) {
-  await kv.set(CONTACT_KEY, data);
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    await put(CONTACT_DATA_KEY, blob, {
+      access: 'public',
+    });
+  } catch (error) {
+    console.error('Error writing contact data:', error);
+    throw error;
+  }
 }
 
 // GET handler to retrieve contact data

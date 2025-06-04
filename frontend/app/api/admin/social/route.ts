@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+import { put, del } from '@vercel/blob';
 
 interface SocialMediaData {
   instagram: string;
@@ -7,21 +7,48 @@ interface SocialMediaData {
   twitter: string;
 }
 
-const SOCIAL_KEY = 'social_media_data';
-
-const defaultSocialData: SocialMediaData = {
-  instagram: 'https://instagram.com/example',
-  facebook: 'https://facebook.com/example',
-  twitter: 'https://twitter.com/example'
-};
+const SOCIAL_DATA_KEY = 'social-data.json';
 
 async function readSocialData(): Promise<SocialMediaData> {
-  const data = await kv.get<SocialMediaData>(SOCIAL_KEY);
-  return data || defaultSocialData;
+  try {
+    // Try to fetch from Vercel Blob storage
+    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : ''}/social-data.json`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`
+      }
+    });
+    
+    if (response.ok) {
+      return await response.json();
+    }
+    
+    // If not found, return default structure
+    return {
+      instagram: 'https://instagram.com/mrmahanta',
+      facebook: 'https://facebook.com/mrmahanta',
+      twitter: 'https://twitter.com/mrmahanta'
+    };
+  } catch (error) {
+    console.error('Error reading social data:', error);
+    // Return default structure on error
+    return {
+      instagram: 'https://instagram.com/mrmahanta',
+      facebook: 'https://facebook.com/mrmahanta',
+      twitter: 'https://twitter.com/mrmahanta'
+    };
+  }
 }
 
 async function writeSocialData(data: SocialMediaData) {
-  await kv.set(SOCIAL_KEY, data);
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    await put(SOCIAL_DATA_KEY, blob, {
+      access: 'public',
+    });
+  } catch (error) {
+    console.error('Error writing social data:', error);
+    throw error;
+  }
 }
 
 // GET handler to retrieve social media data

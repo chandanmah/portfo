@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+import { put, del } from '@vercel/blob';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -7,16 +7,40 @@ interface AuthData {
   hashedPassword?: string;
 }
 
-const AUTH_KEY = 'admin_auth_data';
+const AUTH_DATA_KEY = 'auth-data.json';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 async function readAuthData(): Promise<AuthData> {
-  const data = await kv.get<AuthData>(AUTH_KEY);
-  return data || {};
+  try {
+    // Try to fetch from Vercel Blob storage
+    const response = await fetch(`${process.env.BLOB_READ_WRITE_TOKEN ? 'https://blob.vercel-storage.com' : ''}/auth-data.json`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`
+      }
+    });
+    
+    if (response.ok) {
+      return await response.json();
+    }
+    
+    // If not found, return empty structure
+    return {};
+  } catch (error) {
+    console.error('Error reading auth data:', error);
+    return {};
+  }
 }
 
 async function writeAuthData(data: AuthData) {
-  await kv.set(AUTH_KEY, data);
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    await put(AUTH_DATA_KEY, blob, {
+      access: 'public',
+    });
+  } catch (error) {
+    console.error('Error writing auth data:', error);
+    throw error;
+  }
 }
 
 // POST handler for login and password setup
