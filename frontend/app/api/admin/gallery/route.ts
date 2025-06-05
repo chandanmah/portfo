@@ -62,7 +62,14 @@ async function writeGalleryData(data: { galleryImages: GalleryImage[] }): Promis
 export async function GET() {
   try {
     const data = await readGalleryData();
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+      }
+    });
   } catch (error) {
     return NextResponse.json({ message: 'Error reading gallery data' }, { status: 500 });
   }
@@ -100,7 +107,14 @@ export async function POST(request: NextRequest) {
     data.galleryImages.push(newImage);
     await writeGalleryData(data);
 
-    return NextResponse.json({ message: 'Gallery image uploaded successfully', image: newImage });
+    return NextResponse.json({ message: 'Gallery image uploaded successfully', image: newImage }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+      }
+    });
   } catch (error) {
     console.error('Error uploading gallery image:', error);
     return NextResponse.json({ message: 'Error uploading gallery image', error: error.message }, { status: 500 });
@@ -139,7 +153,14 @@ export async function DELETE(request: NextRequest) {
     data.galleryImages.splice(imageIndex, 1);
     await writeGalleryData(data);
 
-    return NextResponse.json({ message: 'Gallery image deleted successfully' });
+    return NextResponse.json({ message: 'Gallery image deleted successfully' }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+      }
+    });
   } catch (error) {
     console.error('Error deleting gallery image:', error);
     return NextResponse.json({ message: 'Error deleting gallery image', error: error.message }, { status: 500 });

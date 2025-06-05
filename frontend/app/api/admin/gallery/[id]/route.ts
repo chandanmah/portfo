@@ -87,6 +87,13 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ 
       message: 'Image updated successfully', 
       image: data.galleryImages[imageIndex] 
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+      }
     });
   } catch (error) {
     console.error('Error updating gallery image:', error);

@@ -60,7 +60,15 @@ export default function AdminArtManagementPage() {
 
   const fetchGalleryImages = async () => {
     try {
-      const response = await fetch('/api/admin/gallery');
+      // Add cache-busting parameter to ensure fresh data
+      const timestamp = Date.now();
+      const response = await fetch(`/api/admin/gallery?_t=${timestamp}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       if (!response.ok) throw new Error('Failed to fetch gallery images');
       const data: GalleryData = await response.json();
       setGalleryImages(data.galleryImages || []);
@@ -159,6 +167,8 @@ export default function AdminArtManagementPage() {
     if (errorCount > 0) finalMessage += `${errorCount} image(s) failed to upload.`;
     
     if (successCount > 0) {
+      // Small delay to ensure server has processed the changes
+      await new Promise(resolve => setTimeout(resolve, 100));
       await fetchGalleryImages(); // Fetch updated list if any upload was successful
     }
 
@@ -202,19 +212,10 @@ export default function AdminArtManagementPage() {
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
         const result = await response.json();
-        setGalleryImages(prevImages => 
-          prevImages.map(img => 
-            img.id === editingImageId ? { ...img, name: editText.name, subtitle: editText.subtitle } : img
-          )
-        );
         setGalleryUploadMessage(result.message || 'Image details updated successfully.');
-        // Optimistically update local state first
-        setGalleryImages(prevImages => 
-          prevImages.map(img => 
-            img.id === editingImageId ? { ...img, name: editText.name, subtitle: editText.subtitle } : img
-          )
-        );
         handleCancelEdit(); // Reset editing state
+        // Small delay to ensure server has processed the change
+        await new Promise(resolve => setTimeout(resolve, 100));
         await fetchGalleryImages(); // Re-fetch to ensure consistency
       } else {
         const responseText = await response.text();
@@ -236,6 +237,8 @@ const handleGalleryImageDelete = async (imageId: string) => {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || 'Failed to delete gallery image');
+      // Small delay to ensure server has processed the change
+      await new Promise(resolve => setTimeout(resolve, 100));
       await fetchGalleryImages(); // Re-fetch to ensure consistency
       alert(result.message);
     } catch (error) {
