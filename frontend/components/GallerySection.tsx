@@ -211,7 +211,7 @@ const GallerySection: React.FC = () => {
       </div>
       {isModalOpen && selectedImage && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xl p-4 transition-opacity duration-300 ease-in-out" // Adjusted bg-black/60 to bg-black/30 and increased blur to backdrop-blur-xl for more pronounced effect
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xl transition-opacity duration-300 ease-in-out w-full h-full min-h-screen min-w-screen p-4" // Ensure full viewport coverage and retain padding for content
           onClick={closeImageModal} // Close modal when clicking on the backdrop
         >
           <div 

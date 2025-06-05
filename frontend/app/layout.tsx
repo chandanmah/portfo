@@ -26,7 +26,10 @@ const crimson = Crimson_Text({
 export const metadata: Metadata = {
   title: "Chandan Mahanta | Watercolor Artist",
   description: "Portfolio of watercolor paintings and artworks by Chandan Mahanta",
-    creator: 'Jerry Bora'
+  creator: 'Jerry Bora',
+  icons: {
+    icon: '/Untitled design (1).ico',
+  },
 }
 
 export default function RootLayout({

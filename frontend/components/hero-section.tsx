@@ -41,7 +41,7 @@ export default function HeroSection() {
     });
   };
   return (
-    <section className="flex items-center justify-center min-h-[80vh] py-20 px-4 bg-transparent">
+    <section className="flex items-center justify-center min-h-[80vh] pt-10 pb-20 md:py-20 px-4 bg-transparent">
       {/* Unified Frosted Glass Card */}
       <div className="relative max-w-6xl w-full">
         <div className="bg-secondary/25 backdrop-blur-lg rounded-3xl border border-[#3B3024]/35 shadow-[0_0_50px_rgba(0,0,0,0.25)] p-8 md:p-12">
