@@ -48,15 +48,7 @@ export default function AdminArtManagementPage() {
 
   const fetchAvatar = async () => {
     try {
-      // Add cache-busting parameter to ensure fresh data
-      const timestamp = Date.now();
-      const response = await fetch(`/api/admin/avatar?_t=${timestamp}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
+      const response = await fetch('/api/admin/avatar');
       if (!response.ok) throw new Error('Failed to fetch avatar');
       const data: AvatarData = await response.json();
       setCurrentAvatarUrl(data.avatarUrl || '');
@@ -118,10 +110,6 @@ export default function AdminArtManagementPage() {
       // Clear the file input if possible (might need a ref or reset form)
       const avatarInput = document.getElementById('avatarInput') as HTMLInputElement;
       if(avatarInput) avatarInput.value = '';
-      
-      // Small delay to ensure server has processed the change
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await fetchAvatar(); // Re-fetch to ensure consistency
     } catch (error) {
       console.error('Error uploading avatar:', error);
       setAvatarUploadMessage(error instanceof Error ? error.message : 'Error uploading avatar.');

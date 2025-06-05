@@ -15,7 +15,6 @@ export default function HeroSection() {
   useEffect(() => {
     const fetchAvatar = async () => {
       try {
-        // Add cache-busting parameter to ensure fresh data
         const timestamp = Date.now();
         const response = await fetch(`/api/admin/avatar?_t=${timestamp}`, {
           cache: 'no-store',
@@ -26,6 +25,7 @@ export default function HeroSection() {
         });
         if (!response.ok) {
           console.error('Failed to fetch avatar');
+          // Keep placeholder if fetch fails
           return;
         }
         const data: AvatarData = await response.json();
@@ -34,6 +34,7 @@ export default function HeroSection() {
         }
       } catch (error) {
         console.error('Error fetching avatar:', error);
+        // Keep placeholder on error
       }
     };
 
