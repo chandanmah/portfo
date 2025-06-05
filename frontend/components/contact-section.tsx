@@ -40,7 +40,7 @@ export default function ContactSection() {
 
   return (
     <div className="container mx-auto px-4">
-      <h2 className="text-3xl md:text-4xl font-bold mb-6 text-center">Get in Touch</h2>
+      <h2 className="text-3xl md:text-4xl font-bold mb-6 text-center text-[#3B3024]">Get in Touch</h2>
 
       <div className="grid md:grid-cols-2 gap-6">
         <Card className="bg-background/80 backdrop-blur-sm border-primary/20">

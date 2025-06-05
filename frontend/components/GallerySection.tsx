@@ -161,8 +161,8 @@ const GallerySection: React.FC = () => {
   return (
     <section id="gallery" className="py-16">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <h2 className="text-5xl font-bold text-center text-gray-800 mb-16 tracking-tight">
-          Our Gallery
+        <h2 className="text-5xl font-bold text-center text-[#3B3024] mb-16 tracking-tight">
+          Gallery
         </h2>
         <div className="columns-1 sm:columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4">
           {/* The `space-y-4` adds vertical spacing between items in the same column. The `gap-4` handles horizontal spacing between columns. */}
