@@ -56,10 +56,26 @@ async function saveAvatarData(data: { avatarUrl: string }): Promise<void> {
 export async function GET() {
   try {
     const data = await getAvatarData();
-    return NextResponse.json(data || { avatarUrl: '' });
+    const response = NextResponse.json(data || { avatarUrl: '' });
+    
+    // Add cache control headers to prevent caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    response.headers.set('Surrogate-Control', 'no-store');
+    
+    return response;
   } catch (error) {
     console.error('Error reading avatar data:', error);
-    return NextResponse.json({ avatarUrl: '' });
+    const response = NextResponse.json({ avatarUrl: '' });
+    
+    // Add cache control headers to prevent caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    response.headers.set('Surrogate-Control', 'no-store');
+    
+    return response;
   }
 }
 
@@ -103,9 +119,25 @@ export async function POST(request: NextRequest) {
     const newData = { avatarUrl: blob.url };
     await saveAvatarData(newData);
 
-    return NextResponse.json({ message: 'Avatar uploaded successfully', avatarUrl: blob.url });
+    const response = NextResponse.json({ message: 'Avatar uploaded successfully', avatarUrl: blob.url });
+    
+    // Add cache control headers to prevent caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    response.headers.set('Surrogate-Control', 'no-store');
+    
+    return response;
   } catch (error) {
     console.error('Error uploading avatar:', error);
-    return NextResponse.json({ message: 'Error uploading avatar', error: error.message }, { status: 500 });
+    const response = NextResponse.json({ message: 'Error uploading avatar', error: error.message }, { status: 500 });
+    
+    // Add cache control headers to prevent caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    response.headers.set('Surrogate-Control', 'no-store');
+    
+    return response;
   }
 }

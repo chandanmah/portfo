@@ -10,15 +10,22 @@ interface AvatarData {
 }
 
 export default function HeroSection() {
-  const [avatarUrl, setAvatarUrl] = useState<string>("/placeholder.svg");
+  const [avatarUrl, setAvatarUrl] = useState<string>("");
 
   useEffect(() => {
     const fetchAvatar = async () => {
       try {
-        const response = await fetch('/api/admin/avatar');
+        // Add cache-busting parameter to ensure fresh data
+        const timestamp = Date.now();
+        const response = await fetch(`/api/admin/avatar?_t=${timestamp}`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
+        });
         if (!response.ok) {
           console.error('Failed to fetch avatar');
-          // Keep placeholder if fetch fails
           return;
         }
         const data: AvatarData = await response.json();
@@ -27,7 +34,6 @@ export default function HeroSection() {
         }
       } catch (error) {
         console.error('Error fetching avatar:', error);
-        // Keep placeholder on error
       }
     };
 
