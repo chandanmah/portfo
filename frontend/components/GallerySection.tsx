@@ -2,6 +2,10 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+
+interface GallerySectionProps {
+  refreshKey?: number; // New prop to trigger refresh
+}
 import Image from 'next/image';
 
 interface GalleryMedia {
@@ -15,7 +19,7 @@ interface GalleryMedia {
 
 
 
-const GallerySection: React.FC = () => {
+const GallerySection: React.FC<GallerySectionProps> = ({ refreshKey }) => {
   const [mediaItems, setMediaItems] = useState<GalleryMedia[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +80,7 @@ const GallerySection: React.FC = () => {
     };
 
     fetchGalleryImages();
-  }, []);
+  }, [refreshKey]); // Re-fetch when refreshKey changes
 
   useEffect(() => {
     const observer = new IntersectionObserver(

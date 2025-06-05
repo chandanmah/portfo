@@ -31,6 +31,7 @@ export default function AdminArtManagementPage() {
   const [selectedGalleryFiles, setSelectedGalleryFiles] = useState<File[]>([]); // Changed to handle multiple files
   const [galleryUploadMessage, setGalleryUploadMessage] = useState<string>('');
   const [galleryErrorMessage, setGalleryErrorMessage] = useState<string>('');
+  const [galleryRefreshKey, setGalleryRefreshKey] = useState<number>(0);
   // State for editing image details
   const [editingImageId, setEditingImageId] = useState<string | null>(null);
   const [editText, setEditText] = useState<{ name: string; subtitle: string }>({ name: '', subtitle: '' });
@@ -44,7 +45,7 @@ export default function AdminArtManagementPage() {
   useEffect(() => {
     fetchAvatar();
     fetchGalleryImages();
-  }, []);
+  }, [galleryRefreshKey]);
 
   const fetchAvatar = async () => {
     try {
@@ -162,6 +163,7 @@ export default function AdminArtManagementPage() {
     setSelectedGalleryFiles([]);
     const galleryInput = document.getElementById('galleryInput') as HTMLInputElement;
     if(galleryInput) galleryInput.value = ''; // Clear file input
+    setGalleryRefreshKey(prev => prev + 1); // Trigger refresh
   };
 
     const handleEditImage = (image: GalleryImage) => {
@@ -204,6 +206,7 @@ export default function AdminArtManagementPage() {
         );
         setGalleryUploadMessage(result.message || 'Image details updated successfully.');
         handleCancelEdit(); // Reset editing state
+        setGalleryRefreshKey(prev => prev + 1); // Trigger refresh
       } else {
         const responseText = await response.text();
         console.error('Non-JSON response received:', responseText);
@@ -226,6 +229,7 @@ const handleGalleryImageDelete = async (imageId: string) => {
       if (!response.ok) throw new Error(result.message || 'Failed to delete gallery image');
       setGalleryImages(prevImages => prevImages.filter(img => img.id !== imageId));
       alert(result.message);
+      setGalleryRefreshKey(prev => prev + 1); // Trigger refresh
     } catch (error) {
       console.error('Error deleting gallery image:', error);
       setGalleryErrorMessage(error instanceof Error ? error.message : 'Error deleting gallery image.');
