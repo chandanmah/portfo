@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic'; // Prevent caching of this route
 import { put, del, head } from '@vercel/blob';
 
 interface GalleryImage {
@@ -20,7 +22,7 @@ async function readGalleryData(): Promise<{ galleryImages: GalleryImage[] }> {
 
   try {
     const headResult = await head(GALLERY_CONFIG_KEY, { token });
-    const response = await fetch(headResult.url);
+    const response = await fetch(headResult.url, { cache: 'no-store' });
 
     if (response.ok) {
       return await response.json();
