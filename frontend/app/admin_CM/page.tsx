@@ -31,7 +31,6 @@ export default function AdminArtManagementPage() {
   const [selectedGalleryFiles, setSelectedGalleryFiles] = useState<File[]>([]); // Changed to handle multiple files
   const [galleryUploadMessage, setGalleryUploadMessage] = useState<string>('');
   const [galleryErrorMessage, setGalleryErrorMessage] = useState<string>('');
-  const [galleryRefreshKey, setGalleryRefreshKey] = useState<number>(0);
   // State for editing image details
   const [editingImageId, setEditingImageId] = useState<string | null>(null);
   const [editText, setEditText] = useState<{ name: string; subtitle: string }>({ name: '', subtitle: '' });
@@ -45,7 +44,7 @@ export default function AdminArtManagementPage() {
   useEffect(() => {
     fetchAvatar();
     fetchGalleryImages();
-  }, [galleryRefreshKey]);
+  }, []);
 
   const fetchAvatar = async () => {
     try {
@@ -145,7 +144,7 @@ export default function AdminArtManagementPage() {
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || `Failed to upload ${file.name}`);
-        setGalleryImages(prevImages => [...prevImages, result.image]);
+        // No optimistic update here, will fetch all images after loop
         successCount++;
       } catch (error) {
         console.error(`Error uploading ${file.name}:`, error);
@@ -158,12 +157,16 @@ export default function AdminArtManagementPage() {
     let finalMessage = '';
     if (successCount > 0) finalMessage += `${successCount} image(s) uploaded successfully. `;
     if (errorCount > 0) finalMessage += `${errorCount} image(s) failed to upload.`;
+    
+    if (successCount > 0) {
+      await fetchGalleryImages(); // Fetch updated list if any upload was successful
+    }
+
     setGalleryUploadMessage(finalMessage.trim() || 'Upload process finished.');
     
     setSelectedGalleryFiles([]);
     const galleryInput = document.getElementById('galleryInput') as HTMLInputElement;
     if(galleryInput) galleryInput.value = ''; // Clear file input
-    setGalleryRefreshKey(prev => prev + 1); // Trigger refresh
   };
 
     const handleEditImage = (image: GalleryImage) => {
@@ -205,8 +208,14 @@ export default function AdminArtManagementPage() {
           )
         );
         setGalleryUploadMessage(result.message || 'Image details updated successfully.');
+        // Optimistically update local state first
+        setGalleryImages(prevImages => 
+          prevImages.map(img => 
+            img.id === editingImageId ? { ...img, name: editText.name, subtitle: editText.subtitle } : img
+          )
+        );
         handleCancelEdit(); // Reset editing state
-        setGalleryRefreshKey(prev => prev + 1); // Trigger refresh
+        await fetchGalleryImages(); // Re-fetch to ensure consistency
       } else {
         const responseText = await response.text();
         console.error('Non-JSON response received:', responseText);
@@ -227,9 +236,8 @@ const handleGalleryImageDelete = async (imageId: string) => {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || 'Failed to delete gallery image');
-      setGalleryImages(prevImages => prevImages.filter(img => img.id !== imageId));
+      await fetchGalleryImages(); // Re-fetch to ensure consistency
       alert(result.message);
-      setGalleryRefreshKey(prev => prev + 1); // Trigger refresh
     } catch (error) {
       console.error('Error deleting gallery image:', error);
       setGalleryErrorMessage(error instanceof Error ? error.message : 'Error deleting gallery image.');
