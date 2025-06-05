@@ -79,7 +79,7 @@ export default function HeroSection() {
                 Chandan Mahanta
               </h1>
               <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold text-[#6B5C4F] mb-8 drop-shadow-md italic tracking-wider">
-                Artist & Photographer 
+                Artist and Photographer 
               </h2>
               <p className="text-lg md:text-xl font-crimson mb-10 text-[#4A4036] drop-shadow-sm leading-relaxed max-w-xl">
                 Exploring the delicate beauty of life through the flowing medium of watercolor. With over 15 years of dedication, my paintings capture fleeting moments of beauty with remarkable sensitivity. Each piece is a meditation on patience and presence, inviting you to slow down and appreciate the subtle details that often go unnoticed.
