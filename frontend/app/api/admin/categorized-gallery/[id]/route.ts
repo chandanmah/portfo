@@ -31,6 +31,25 @@ const VALID_CATEGORIES = [
   'furniture'
 ];
 
+// Helper function for retrying operations with exponential backoff
+async function retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      if (i === maxRetries - 1) throw error;
+      console.warn(`Operation failed. Retrying in ${delay / 1000}s... (Attempt ${i + 1}/${maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Exponential backoff
+    }
+  }
+  throw new Error('Operation failed after maximum retries');
+}
+
 // Helper function to get categorized gallery data from Vercel Blob
 async function readCategorizedData(): Promise<CategoryData> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
@@ -39,41 +58,44 @@ async function readCategorizedData(): Promise<CategoryData> {
     return {};
   }
 
-  try {
-    const headResult = await head(CATEGORIZED_CONFIG_KEY, { token });
-    const response = await fetch(headResult.url, { cache: 'no-store' });
+  return retryOperation(async () => {
+    try {
+      const headResult = await head(CATEGORIZED_CONFIG_KEY, { token });
+      const response = await fetch(headResult.url, { cache: 'no-store' });
 
-    if (response.ok) {
-      return await response.json();
-    }
-    if (response.status === 404) {
-      console.log(`Categorized gallery config file '${CATEGORIZED_CONFIG_KEY}' not found.`);
-      return {};
-    }
-    console.error(`Error fetching categorized gallery config: ${response.status} ${response.statusText}`);
-    return {};
-  } catch (error: any) {
-    if ((error.status && error.status === 404) || (error.message && error.message.toLowerCase().includes('does not exist'))) {
-        console.log(`Categorized gallery config file '${CATEGORIZED_CONFIG_KEY}' not found in blob storage.`);
+      if (response.ok) {
+        const data = await response.json();
+        return data || {};
+      }
+      if (response.status === 404) {
+        console.log(`Config file not found, returning empty object.`);
         return {};
+      }
+      throw new Error(`Failed to fetch config: ${response.statusText}`);
+    } catch (error: any) {
+      if (error.message.includes('does not exist')) {
+        console.log(`Config file not found, returning empty object.`);
+        return {};
+      }
+      throw error;
     }
-    console.error('Error in readCategorizedData:', error);
-    return {};
-  }
+  });
 }
 
 // Helper function to save categorized gallery data to Vercel Blob
 async function writeCategorizedData(data: CategoryData): Promise<void> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
-    console.error('BLOB_READ_WRITE_TOKEN is not set. Cannot save categorized gallery data.');
-    return;
+    throw new Error('BLOB_READ_WRITE_TOKEN is not set.');
   }
-  await put(CATEGORIZED_CONFIG_KEY, JSON.stringify(data), {
-    access: 'public',
-    contentType: 'application/json',
-    token: token,
-    allowOverwrite: true,
+
+  await retryOperation(async () => {
+    await put(CATEGORIZED_CONFIG_KEY, JSON.stringify(data), {
+      access: 'public',
+      contentType: 'application/json',
+      token: token,
+      addRandomSuffix: false,
+    });
   });
 }
 
