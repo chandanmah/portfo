@@ -189,9 +189,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
         alert('Media deleted successfully');
         
         // Add delay before refetching
-        setTimeout(() => {
+        
           fetchCategorizedData();
-        }, 100);
+        
       } else {
         alert('Failed to delete media');
       }
