@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 
 interface CategorizedMedia {
+  temp: any;
   id: string;
   url: string;
   name: string;
@@ -33,6 +34,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const [categoryData, setCategoryData] = useState<CategoryData>({});
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+const [pendingOperations, setPendingOperations] = useState<Set<string>>(new Set());
   const [selectedCategory, setSelectedCategory] = useState<string>('architecture');
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [editingItem, setEditingItem] = useState<CategorizedMedia | null>(null);
@@ -43,10 +45,14 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const buttonStyle = "px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
 
   // Fetch categorized gallery data
-  const fetchCategorizedData = async () => {
+  const purgeCache = () => {
+  sessionStorage.setItem('cachePurgeToken', Date.now().toString());
+};
+
+const fetchCategorizedData = async (attempt = 1) => {
     try {
-      const timestamp = Date.now();
-      const response = await fetch(`/api/admin/categorized-gallery?t=${timestamp}`, {
+      const cacheVersion = sessionStorage.getItem('cachePurgeToken') || Date.now();
+    const response = await fetch(`/api/admin/categorized-gallery?t=${cacheVersion}`, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',
@@ -55,7 +61,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setCategoryData(data);
+        setCategoryData(data); // Replace with fresh server state
       } else {
         console.error('Failed to fetch categorized gallery data');
       }
@@ -67,7 +73,13 @@ const CategorizedGalleryAdmin: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchCategorizedData();
+    // Remove temporary items and refresh
+setCategoryData(prev => ({
+  ...prev,
+  [selectedCategory]: (prev[selectedCategory] || []).filter(item => !item.temp)
+}));
+purgeCache();
+fetchCategorizedData();
   }, []);
 
   // Handle file selection
@@ -83,6 +95,20 @@ const CategorizedGalleryAdmin: React.FC = () => {
     }
 
     setUploading(true);
+    
+    // Optimistic update: Create temporary entries
+    const tempItems = Array.from(selectedFiles).map(file => ({
+      id: `temp-${Date.now()}-${file.name}`,
+      url: URL.createObjectURL(file),
+      name: file.name.split('.')[0],
+      category: selectedCategory,
+      type: file.type.startsWith('video/') ? 'video' : 'image',
+      temp: true
+    }));
+    
+    setCategoryData(prev => ({...prev,[selectedCategory]: [...(prev[selectedCategory] || []), ...tempItems]
+    }));
+
     const uploadPromises = [];
 
     for (let i = 0; i < selectedFiles.length; i++) {
@@ -119,8 +145,17 @@ const CategorizedGalleryAdmin: React.FC = () => {
         const fileInput = document.getElementById('media-upload') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
         
-        // Add delay before refetching
-        fetchCategorizedData();
+        // Add short delay to ensure server-side updates
+        purgeCache();
+setPendingOperations(prev => new Set([...prev, 'fetch']));
+setTimeout(() => {
+  fetchCategorizedData(attempt + 1)
+    .finally(() => setPendingOperations(prev => {
+      const next = new Set(prev);
+      next.delete('fetch');
+      return next;
+    }));
+}, Math.min(1000 * attempt, 5000)); // Increased delay for server-side processing
       } else {
         alert('Some uploads failed. Please try again.');
       }
@@ -144,8 +179,21 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const handleSaveEdit = async () => {
     if (!editingItem) return;
 
+    // Optimistic update
+    setCategoryData(prev => ({
+      ...prev,
+      [editingItem.category]: prev[editingItem.category].map(item =>
+        item.id === editingItem.id ? {
+          ...item,
+          name: editName,
+          subtitle: editSubtitle,
+          category: editCategory
+        } : item
+      )
+    }));
+
     try {
-      const response = await fetch(`/api/admin/categorized-gallery/${editingItem.id}`, {
+      const response = await fetch(`/api/admin/categorized-gallery/${editingItem.id}?t=${Date.now()}&rand=${Math.random()}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -162,9 +210,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
         setEditingItem(null);
         
         // Add delay before refetching
-        setTimeout(() => {
-          fetchCategorizedData();
-        }, 100);
+        setTimeout(() => fetchCategorizedData(), 500);
       } else {
         alert('Failed to update media');
       }
@@ -180,17 +226,23 @@ const CategorizedGalleryAdmin: React.FC = () => {
       return;
     }
 
-    try {
-      const response = await fetch(`/api/admin/categorized-gallery?id=${item.id}&category=${item.category}`, {
-        method: 'DELETE',
-      });
+    // Optimistic update
+    setCategoryData(prev => ({
+      ...prev,
+      [item.category]: prev[item.category].filter(i => i.id !== item.id)
+    }));
 
+    try {
+      const response = await fetch(`/api/admin/categorized-gallery?id=${item.id}&category=${item.category}&t=${Date.now()}`, {
+        method: 'DELETE',
+        cache: 'no-store',
+        });
       if (response.ok) {
         alert('Media deleted successfully');
         
         // Add delay before refetching
         
-          fetchCategorizedData();
+          setTimeout(() => fetchCategorizedData(), 500);
         
       } else {
         alert('Failed to delete media');
@@ -202,7 +254,10 @@ const CategorizedGalleryAdmin: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="text-center py-8">Loading categorized gallery...</div>;
+    return <div className="text-center py-8">
+  {pendingOperations.has('fetch') && 'Syncing with server...'}
+  {!pendingOperations.size && 'Loading categorized gallery...'}
+</div>;
   }
 
   return (
