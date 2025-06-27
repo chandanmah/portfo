@@ -98,14 +98,21 @@ const CategorizedGalleryAdmin: React.FC = () => {
           method: 'POST',
           body: formData,
         })
+          .then(async response => {
+            if (!response.ok) {
+              const error = await response.json();
+              throw new Error(error.message || 'Upload failed');
+            }
+            return response;
+          })
       );
     }
 
     try {
-      const responses = await Promise.all(uploadPromises);
-      const allSuccessful = responses.every(response => response.ok);
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUploads = results.filter(r => r.status === 'fulfilled').length;
 
-      if (allSuccessful) {
+      if (successfulUploads) {
         alert(`Successfully uploaded ${selectedFiles.length} file(s)`);
         setSelectedFiles(null);
         // Reset file input
@@ -113,9 +120,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
         if (fileInput) fileInput.value = '';
         
         // Add delay before refetching
-        setTimeout(() => {
-          fetchCategorizedData();
-        }, 100);
+        fetchCategorizedData();
       } else {
         alert('Some uploads failed. Please try again.');
       }
@@ -192,7 +197,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
       }
     } catch (error) {
       console.error('Error deleting media:', error);
-      alert('Error deleting media');
+      alert(`Delete failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
