@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import Navbar from "@/components/navbar"
 import SectionWrapper from "@/components/section-wrapper"
 import HeroSection from "@/components/hero-section"
-import GallerySection from "@/components/GallerySection"
+import CategorizedGallerySection from "@/components/CategorizedGallerySection"
 import ContactSection from "@/components/contact-section"
 import Footer from "@/components/footer"
 
@@ -48,7 +48,7 @@ export default function Home() {
       </SectionWrapper>
 
       <SectionWrapper id="gallery">
-        <GallerySection />
+        <CategorizedGallerySection />
       </SectionWrapper>
 
       {/* {/* <SectionWrapper id="about">

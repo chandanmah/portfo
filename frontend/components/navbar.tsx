@@ -14,7 +14,7 @@ import { useEffect, useState } from "react"
 
 const navLinks = [
   { href: "#home", label: "Home" },
-  { href: "#gallery", label: "Gallery" },
+  { href: "#gallery", label: "My Creations" },
   { href: "#contact", label: "Contact" },
 ]
 
@@ -76,7 +76,7 @@ export default function Navbar() {
       
       <div className="container mx-auto px-4 py-4 flex items-center justify-between">
         <Link href="#home" className="font-playfair text-2xl font-bold text-white drop-shadow-lg hover:text-white/90 transition-colors">
-          Mr. Mahanta
+          Studio Mahanta
         </Link>
 
         {/* Desktop Navigation */}

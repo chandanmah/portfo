@@ -83,17 +83,20 @@ export default function HeroSection() {
             {/* Content Section */}
             <div className="flex-1 text-center lg:text-left">
               <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight text-[#3B3024] drop-shadow-lg font-playfair">
-                Chandan Mahanta
+                Studio Mahanta
               </h1>
               <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold text-[#6B5C4F] mb-8 drop-shadow-md italic tracking-wider">
-                Artist and Photographer 
+                Architect, artist, photographer and more.
               </h2>
               <p className="text-lg md:text-xl font-crimson mb-10 text-[#4A4036] drop-shadow-sm leading-relaxed max-w-xl">
-                Exploring the delicate beauty of life through the flowing medium of watercolor. With over 15 years of dedication, my paintings capture fleeting moments of beauty with remarkable sensitivity. Each piece is a meditation on patience and presence, inviting you to slow down and appreciate the subtle details that often go unnoticed.
+                I'm a retired architect rediscovering the joys of watercolor painting after a 50-year pause — now honored with awards and recognition. My world is rooted in creativity and craftsmanship: I'm also a photographer, native plant gardener, beekeeper, mead (honey wine) maker, and furniture artisan. This space is a reflection of those passions — where art meets nature, precision meets play, and tradition finds new expression.
+              </p>
+              <p className="text-lg md:text-xl font-crimson mb-10 text-[#4A4036] drop-shadow-sm leading-relaxed max-w-xl">
+                Thank you for visiting — I hope you'll find beauty, inspiration, and perhaps a bit of wonder here.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                 <Button asChild variant="outline" className="rounded-[1.25rem] bg-[#8C6239]/80 hover:bg-[#7A5530] text-[#F7EEDD] hover:text-[#F7EEDD] border-[#70463C] backdrop-blur-lg px-8 py-4 text-lg font-semibold shadow-xl transition-all duration-300 transform hover:scale-105">
-                  <a href="#gallery" onClick={smoothScrollTo('gallery')}>Explore My Works</a>
+                  <a href="#gallery" onClick={smoothScrollTo('gallery')}>Explore My Creations</a>
                 </Button>
                 <Button asChild variant="outline" className="rounded-[1.25rem] bg-[#70463C]/80 hover:bg-[#603C33] text-[#F7EEDD] hover:text-[#F7EEDD] border-[#70463C] backdrop-blur-lg px-8 py-4 text-lg font-semibold shadow-xl transition-all duration-300 transform hover:scale-105">
                   <a href="#contact" onClick={smoothScrollTo('contact')} className="flex items-center gap-2">
