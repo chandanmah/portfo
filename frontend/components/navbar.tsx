@@ -21,6 +21,7 @@ const navLinks = [
 export default function Navbar() {
   const [isVisible, setIsVisible] = useState(false);
   const [isGalleryModalActive, setIsGalleryModalActive] = useState(false);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   useEffect(() => {
     const toggleVisibility = () => {
@@ -93,16 +94,14 @@ export default function Navbar() {
         </nav>
 
         {/* Mobile Navigation */}
-        <Sheet>
+        <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
           <SheetTrigger asChild className="md:hidden">
-            {/* Ensure SheetTrigger has an accessible name if it's just an icon */}
-          
             <Button variant="ghost" size="icon" className="bg-white/10 backdrop-blur-md border border-white/20 text-white hover:bg-white/20 hover:border-white/30">
               <Menu className="h-6 w-6" />
               <span className="sr-only">Toggle menu</span>
             </Button>
           </SheetTrigger>
-          <SheetContent side="right" className="w-[300px] sm:w-[400px] bg-black/80 backdrop-blur-xl border-l border-white/20">
+          <SheetContent side="right" className="w-[300px] sm:w-[400px] bg-black/70 backdrop-blur-2xl border-l border-white/10" showCloseButton={false}>
             <VisuallyHidden>
               <DialogTitle>Mobile Navigation Menu</DialogTitle>
             </VisuallyHidden>
@@ -111,6 +110,7 @@ export default function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  onClick={() => setIsSheetOpen(false)}
                   className="px-4 py-3 rounded-lg text-white/90 hover:text-white transition-all duration-300 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 hover:border-white/30 text-lg font-medium shadow-md hover:shadow-lg"
                 >
                   {link.label}

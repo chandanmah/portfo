@@ -2,7 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter, Playfair_Display, Crimson_Text } from "next/font/google"
 import "./globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
+
 
 const inter = Inter({
   subsets: ["latin"],
@@ -25,7 +25,7 @@ const crimson = Crimson_Text({
 
 export const metadata: Metadata = {
   title: "Chandan Mahanta | Artist",
-  description: "Portfolio of paintings and artworks by Chandan Mahanta",
+  description: "Portfolio of Chandan Mahanta",
   creator: 'Jerry Bora',
   icons: {
     icon: '/Untitled design (1).ico',
@@ -39,10 +39,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${playfair.variable} ${crimson.variable} font-sans`}>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-          {children}
-        </ThemeProvider>
+      <body className={`${inter.variable} ${playfair.variable} ${crimson.variable} font-sans bg-[#F5F5F5]`}>
+        {children}
       </body>
     </html>
   )
