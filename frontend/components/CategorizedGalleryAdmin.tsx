@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 
 interface CategorizedMedia {
-  temp: any;
   id: string;
   url: string;
   name: string;
@@ -13,10 +12,27 @@ interface CategorizedMedia {
   type: 'image' | 'video';
   width?: number;
   height?: number;
+  uploadedAt: string;
+  size?: number;
 }
 
 interface CategoryData {
   [key: string]: CategorizedMedia[];
+}
+
+interface UploadResult {
+  success: boolean;
+  media?: CategorizedMedia;
+  error?: string;
+  fileName?: string;
+}
+
+interface UploadProgress {
+  [fileName: string]: {
+    progress: number;
+    status: 'uploading' | 'success' | 'error';
+    error?: string;
+  };
 }
 
 const CATEGORIES = [
@@ -34,144 +50,217 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const [categoryData, setCategoryData] = useState<CategoryData>({});
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-const [pendingOperations, setPendingOperations] = useState<Set<string>>(new Set());
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({});
   const [selectedCategory, setSelectedCategory] = useState<string>('architecture');
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [editingItem, setEditingItem] = useState<CategorizedMedia | null>(null);
   const [editName, setEditName] = useState('');
   const [editSubtitle, setEditSubtitle] = useState('');
   const [editCategory, setEditCategory] = useState('');
+  const [lastSync, setLastSync] = useState<string>(new Date().toISOString());
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  
+  // Refs for real-time updates
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isComponentMountedRef = useRef(true);
 
   const buttonStyle = "px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
 
-  // Fetch categorized gallery data
-  const purgeCache = () => {
-  sessionStorage.setItem('cachePurgeToken', Date.now().toString());
-};
+  // Show notification
+  const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  }, []);
 
-const fetchCategorizedData = async (attempt = 1) => {
+  // Fetch categorized gallery data
+  const fetchCategorizedData = useCallback(async (showLoadingState = true) => {
     try {
-      const cacheVersion = sessionStorage.getItem('cachePurgeToken') || Date.now();
-    const response = await fetch(`/api/admin/categorized-gallery?t=${cacheVersion}`, {
+      if (showLoadingState) setLoading(true);
+      
+      const response = await fetch('/api/admin/categorized-gallery', {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache'
         }
       });
+      
       if (response.ok) {
         const data = await response.json();
-        setCategoryData(data); // Replace with fresh server state
+        if (isComponentMountedRef.current) {
+          setCategoryData(data);
+          setLastSync(new Date().toISOString());
+        }
       } else {
         console.error('Failed to fetch categorized gallery data');
+        showNotification('Failed to fetch gallery data', 'error');
       }
     } catch (error) {
       console.error('Error fetching categorized gallery data:', error);
+      showNotification('Error fetching gallery data', 'error');
     } finally {
-      setLoading(false);
+      if (showLoadingState && isComponentMountedRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [showNotification]);
 
+  // Real-time sync function
+  const syncData = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/admin/categorized-gallery/sync?lastSync=${encodeURIComponent(lastSync)}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      if (response.ok) {
+        const { data, changes, lastSync: newLastSync, hasChanges } = await response.json();
+        
+        if (hasChanges && isComponentMountedRef.current) {
+          setCategoryData(data);
+          setLastSync(newLastSync);
+          
+          if (changes.length > 0) {
+            showNotification(`${changes.length} item(s) updated`, 'info');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing data:', error);
+    }
+  }, [lastSync, showNotification]);
+
+  // Setup real-time updates
   useEffect(() => {
-    // Remove temporary items and refresh
-setCategoryData(prev => ({
-  ...prev,
-  [selectedCategory]: (prev[selectedCategory] || []).filter(item => !item.temp)
-}));
-purgeCache();
-fetchCategorizedData();
-  }, []);
+    isComponentMountedRef.current = true;
+    
+    // Initial fetch
+    fetchCategorizedData();
+
+    // Setup periodic sync (every 5 seconds)
+    syncIntervalRef.current = setInterval(syncData, 5000);
+
+    return () => {
+      isComponentMountedRef.current = false;
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, [fetchCategorizedData, syncData]);
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSelectedFiles(e.target.files);
+    setUploadProgress({});
   };
 
-  // Handle media upload
+  // Handle media upload with progress tracking
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
-      alert('Please select files to upload');
+      showNotification('Please select files to upload', 'error');
       return;
     }
 
     setUploading(true);
+    const newUploadProgress: UploadProgress = {};
     
-    // Optimistic update: Create temporary entries
-    const tempItems = Array.from(selectedFiles).map(file => ({
-      id: `temp-${Date.now()}-${file.name}`,
-      url: URL.createObjectURL(file),
-      name: file.name.split('.')[0],
-      category: selectedCategory,
-      type: file.type.startsWith('video/') ? 'video' : 'image',
-      temp: true
-    }));
-    
-    setCategoryData(prev => ({
-      ...prev,
-      [selectedCategory]: [
-        ...(prev[selectedCategory] || []),
-        ...tempItems.map(item => ({
-          ...item,
-          type: item.type === 'video' ? 'video' : 'image'
-        } as CategorizedMedia))
-      ]
-    }));
-
-    const uploadPromises = [];
-
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const file = selectedFiles[i];
-      const formData = new FormData();
-      formData.append('media', file);
-      formData.append('category', selectedCategory);
-      formData.append('name', file.name.split('.')[0]);
-      formData.append('subtitle', '');
-
-      uploadPromises.push(
-        fetch('/api/admin/categorized-gallery', {
-          method: 'POST',
-          body: formData,
-        })
-          .then(async response => {
-            if (!response.ok) {
-              const error = await response.json();
-              throw new Error(error.message || 'Upload failed');
-            }
-            return response;
-          })
-      );
-    }
+    // Initialize progress for all files
+    Array.from(selectedFiles).forEach(file => {
+      newUploadProgress[file.name] = {
+        progress: 0,
+        status: 'uploading'
+      };
+    });
+    setUploadProgress(newUploadProgress);
 
     try {
-      const results = await Promise.allSettled(uploadPromises);
-      const successfulUploads = results.filter(r => r.status === 'fulfilled').length;
+      const formData = new FormData();
+      
+      // Add all files and their metadata
+      Array.from(selectedFiles).forEach((file, index) => {
+        formData.append('media', file);
+        formData.append('name', file.name.split('.')[0]);
+        formData.append('subtitle', '');
+      });
+      formData.append('category', selectedCategory);
 
-      if (successfulUploads) {
-        alert(`Successfully uploaded ${selectedFiles.length} file(s)`);
-        setSelectedFiles(null);
-        // Reset file input
-        const fileInput = document.getElementById('media-upload') as HTMLInputElement;
-        if (fileInput) fileInput.value = '';
+      const response = await fetch('/api/admin/categorized-gallery', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        const { results, successCount, failureCount } = result;
         
-        // Add short delay to ensure server-side updates
-        purgeCache();
-setPendingOperations(prev => new Set([...prev, 'fetch']));
-setTimeout(() => {
-fetchCategorizedData()
-    .finally(() => setPendingOperations(prev => {
-      const next = new Set(prev);
-      next.delete('fetch');
-      return next;
-    }));
-}, 1000); // Fixed delay for server-side processing
+        // Update progress for each file
+        const updatedProgress = { ...newUploadProgress };
+        results.forEach((uploadResult: UploadResult) => {
+          const fileName = uploadResult.fileName || uploadResult.media?.name || 'Unknown';
+          if (updatedProgress[fileName]) {
+            updatedProgress[fileName] = {
+              progress: 100,
+              status: uploadResult.success ? 'success' : 'error',
+              error: uploadResult.error
+            };
+          }
+        });
+        setUploadProgress(updatedProgress);
+
+        if (successCount > 0) {
+          showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
+          setSelectedFiles(null);
+          
+          // Clear the file input
+          const fileInput = document.getElementById('media-upload') as HTMLInputElement;
+          if (fileInput) fileInput.value = '';
+          
+          // Refresh data immediately
+          await fetchCategorizedData(false);
+        }
+
+        if (failureCount > 0) {
+          showNotification(`${failureCount} upload(s) failed`, 'error');
+        }
       } else {
-        alert('Some uploads failed. Please try again.');
+        showNotification(result.message || 'Upload failed', 'error');
+        
+        // Mark all as failed
+        const updatedProgress = { ...newUploadProgress };
+        Object.keys(updatedProgress).forEach(fileName => {
+          updatedProgress[fileName] = {
+            progress: 0,
+            status: 'error',
+            error: result.message || 'Upload failed'
+          };
+        });
+        setUploadProgress(updatedProgress);
       }
     } catch (error) {
       console.error('Error uploading media:', error);
-      alert('Error uploading media');
+      showNotification('Error uploading media', 'error');
+      
+      // Mark all as failed
+      const updatedProgress = { ...newUploadProgress };
+      Object.keys(updatedProgress).forEach(fileName => {
+        updatedProgress[fileName] = {
+          progress: 0,
+          status: 'error',
+          error: 'Network error'
+        };
+      });
+      setUploadProgress(updatedProgress);
     } finally {
       setUploading(false);
+      
+      // Clear progress after a delay
+      setTimeout(() => {
+        setUploadProgress({});
+      }, 3000);
     }
   };
 
@@ -187,21 +276,8 @@ fetchCategorizedData()
   const handleSaveEdit = async () => {
     if (!editingItem) return;
 
-    // Optimistic update
-    setCategoryData(prev => ({
-      ...prev,
-      [editingItem.category]: prev[editingItem.category].map(item =>
-        item.id === editingItem.id ? {
-          ...item,
-          name: editName,
-          subtitle: editSubtitle,
-          category: editCategory
-        } : item
-      )
-    }));
-
     try {
-      const response = await fetch(`/api/admin/categorized-gallery/${editingItem.id}?t=${Date.now()}&rand=${Math.random()}`, {
+      const response = await fetch(`/api/admin/categorized-gallery/${editingItem.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -214,17 +290,18 @@ fetchCategorizedData()
       });
 
       if (response.ok) {
-        alert('Media updated successfully');
+        showNotification('Media updated successfully', 'success');
         setEditingItem(null);
         
-        // Add delay before refetching
-        setTimeout(() => fetchCategorizedData(), 500);
+        // Refresh data immediately
+        await fetchCategorizedData(false);
       } else {
-        alert('Failed to update media');
+        const error = await response.json();
+        showNotification(error.message || 'Failed to update media', 'error');
       }
     } catch (error) {
       console.error('Error updating media:', error);
-      alert('Error updating media');
+      showNotification('Error updating media', 'error');
     }
   };
 
@@ -234,42 +311,57 @@ fetchCategorizedData()
       return;
     }
 
-    // Optimistic update
-    setCategoryData(prev => ({
-      ...prev,
-      [item.category]: prev[item.category].filter(i => i.id !== item.id)
-    }));
-
     try {
-      const response = await fetch(`/api/admin/categorized-gallery?id=${item.id}&category=${item.category}&t=${Date.now()}`, {
+      const response = await fetch(`/api/admin/categorized-gallery?id=${item.id}&category=${item.category}`, {
         method: 'DELETE',
         cache: 'no-store',
-        });
+      });
+      
       if (response.ok) {
-        alert('Media deleted successfully');
+        showNotification('Media deleted successfully', 'success');
         
-        // Add delay before refetching
-        
-          setTimeout(() => fetchCategorizedData(), 500);
-        
+        // Refresh data immediately
+        await fetchCategorizedData(false);
       } else {
-        alert('Failed to delete media');
+        const error = await response.json();
+        showNotification(error.message || 'Failed to delete media', 'error');
       }
     } catch (error) {
       console.error('Error deleting media:', error);
-      alert(`Delete failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showNotification('Error deleting media', 'error');
     }
   };
 
+  // Format file size
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return '';
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
   if (loading) {
-    return <div className="text-center py-8">
-  {pendingOperations.has('fetch') && 'Syncing with server...'}
-  {!pendingOperations.size && 'Loading categorized gallery...'}
-</div>;
+    return (
+      <div className="text-center py-8">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading categorized gallery...</p>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
+      {/* Notification */}
+      {notification && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-md shadow-lg ${
+          notification.type === 'success' ? 'bg-green-500 text-white' :
+          notification.type === 'error' ? 'bg-red-500 text-white' :
+          'bg-blue-500 text-white'
+        }`}>
+          {notification.message}
+        </div>
+      )}
+
       {/* Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
         <h3 className="text-lg font-semibold mb-4">Upload New Media</h3>
@@ -307,6 +399,41 @@ fetchCategorizedData()
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+
+          {/* Upload Progress */}
+          {Object.keys(uploadProgress).length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-gray-700">Upload Progress:</h4>
+              {Object.entries(uploadProgress).map(([fileName, progress]) => (
+                <div key={fileName} className="bg-white p-3 rounded border">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-sm font-medium truncate">{fileName}</span>
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      progress.status === 'success' ? 'bg-green-100 text-green-800' :
+                      progress.status === 'error' ? 'bg-red-100 text-red-800' :
+                      'bg-blue-100 text-blue-800'
+                    }`}>
+                      {progress.status === 'success' ? 'Success' :
+                       progress.status === 'error' ? 'Failed' : 'Uploading'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        progress.status === 'success' ? 'bg-green-500' :
+                        progress.status === 'error' ? 'bg-red-500' :
+                        'bg-blue-500'
+                      }`}
+                      style={{ width: `${progress.progress}%` }}
+                    ></div>
+                  </div>
+                  {progress.error && (
+                    <p className="text-xs text-red-600 mt-1">{progress.error}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           
           <button
             onClick={handleUpload}
@@ -340,6 +467,7 @@ fetchCategorizedData()
                             alt={item.name}
                             fill
                             className="object-cover rounded"
+                            unoptimized
                           />
                         </div>
                       ) : (
@@ -357,7 +485,13 @@ fetchCategorizedData()
                         {item.subtitle && (
                           <p className="text-xs text-gray-600 truncate">{item.subtitle}</p>
                         )}
-                        <p className="text-xs text-gray-500 capitalize">{item.type}</p>
+                        <div className="flex justify-between items-center text-xs text-gray-500">
+                          <span className="capitalize">{item.type}</span>
+                          <span>{formatFileSize(item.size)}</span>
+                        </div>
+                        {item.width && item.height && (
+                          <p className="text-xs text-gray-500">{item.width} × {item.height}</p>
+                        )}
                         
                         <div className="flex space-x-2">
                           <button
