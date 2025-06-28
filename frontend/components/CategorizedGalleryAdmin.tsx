@@ -255,7 +255,7 @@ Type "DELETE ALL" to confirm:`;
     setUploadProgress({});
   };
 
-  // Handle media upload with improved progress tracking and error handling
+  // SIMPLIFIED upload handler - no complex progress tracking
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       showNotification('Please select files to upload', 'error');
@@ -263,19 +263,9 @@ Type "DELETE ALL" to confirm:`;
     }
 
     setUploading(true);
-    const newUploadProgress: UploadProgress = {};
     
-    // Initialize progress for all files
-    Array.from(selectedFiles).forEach(file => {
-      newUploadProgress[file.name] = {
-        progress: 0,
-        status: 'uploading'
-      };
-    });
-    setUploadProgress(newUploadProgress);
-
     try {
-      console.log('=== STARTING UPLOAD PROCESS ===');
+      console.log('=== SIMPLIFIED UPLOAD PROCESS ===');
       console.log('Files to upload:', selectedFiles.length);
       console.log('Selected category:', selectedCategory);
 
@@ -292,15 +282,7 @@ Type "DELETE ALL" to confirm:`;
       formData.append('name', ''); // Will use filename if empty
       formData.append('subtitle', '');
 
-      console.log('Sending upload request...');
-
-      // Update progress to show starting
-      Array.from(selectedFiles).forEach(file => {
-        setUploadProgress(prev => ({
-          ...prev,
-          [file.name]: { progress: 10, status: 'uploading' }
-        }));
-      });
+      console.log('Sending simplified upload request...');
 
       const response = await fetch('/api/admin/categorized-gallery', {
         method: 'POST',
@@ -311,19 +293,6 @@ Type "DELETE ALL" to confirm:`;
       console.log('Upload response:', result);
 
       if (response.ok && result.results) {
-        // Process results
-        result.results.forEach((uploadResult: UploadResult) => {
-          const fileName = uploadResult.originalName || uploadResult.fileName || 'unknown';
-          setUploadProgress(prev => ({
-            ...prev,
-            [fileName]: { 
-              progress: 100, 
-              status: uploadResult.success ? 'success' : 'error',
-              error: uploadResult.error
-            }
-          }));
-        });
-
         if (result.successCount > 0) {
           showNotification(`Successfully uploaded ${result.successCount} file(s)`, 'success');
           setSelectedFiles(null);
@@ -342,44 +311,13 @@ Type "DELETE ALL" to confirm:`;
         }
       } else {
         showNotification(result.message || 'Upload failed', 'error');
-        
-        // Mark all as failed
-        Array.from(selectedFiles).forEach(file => {
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: { 
-              progress: 0, 
-              status: 'error',
-              error: result.message || 'Upload failed'
-            }
-          }));
-        });
       }
 
     } catch (error: any) {
       console.error('Error uploading media:', error);
       showNotification('Error uploading media', 'error');
-      
-      // Mark all as failed
-      if (selectedFiles) {
-        Array.from(selectedFiles).forEach(file => {
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: { 
-              progress: 0, 
-              status: 'error',
-              error: error.message || 'Network error'
-            }
-          }));
-        });
-      }
     } finally {
       setUploading(false);
-      
-      // Clear progress after a delay
-      setTimeout(() => {
-        setUploadProgress({});
-      }, 5000);
     }
   };
 
@@ -567,9 +505,9 @@ Type "DELETE ALL" to confirm:`;
         )}
       </div>
       
-      {/* Upload Section */}
+      {/* SIMPLIFIED Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
-        <h3 className="text-lg font-semibold mb-4">Upload New Media</h3>
+        <h3 className="text-lg font-semibold mb-4">Upload New Media (Simplified)</h3>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -578,7 +516,7 @@ Type "DELETE ALL" to confirm:`;
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
             >
               {CATEGORIES.map(cat => (
                 <option key={cat.key} value={cat.key}>
@@ -604,49 +542,22 @@ Type "DELETE ALL" to confirm:`;
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-
-          {/* Upload Progress */}
-          {Object.keys(uploadProgress).length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-gray-700">Upload Progress:</h4>
-              {Object.entries(uploadProgress).map(([fileName, progress]) => (
-                <div key={fileName} className="bg-white p-3 rounded border">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm font-medium truncate">{fileName}</span>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      progress.status === 'success' ? 'bg-green-100 text-green-800' :
-                      progress.status === 'error' ? 'bg-red-100 text-red-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {progress.status === 'success' ? 'Success' :
-                       progress.status === 'error' ? 'Failed' : 'Uploading'}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div 
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        progress.status === 'success' ? 'bg-green-500' :
-                        progress.status === 'error' ? 'bg-red-500' :
-                        'bg-blue-500'
-                      }`}
-                      style={{ width: `${progress.progress}%` }}
-                    ></div>
-                  </div>
-                  {progress.error && (
-                    <p className="text-xs text-red-600 mt-1">{progress.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
           
           <button
             onClick={handleUpload}
             disabled={uploading || !selectedFiles}
             className={`${buttonStyle} bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-400 disabled:cursor-not-allowed`}
           >
-            {uploading ? 'Uploading...' : 'Upload Media'}
+            {uploading ? 'Uploading...' : 'Upload Media (Simplified)'}
           </button>
+          
+          {uploading && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-3">
+              <p className="text-blue-800 text-sm">
+                <strong>Uploading...</strong> Please wait while your files are being uploaded with simplified metadata.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -738,7 +649,7 @@ Type "DELETE ALL" to confirm:`;
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 />
               </div>
               
@@ -750,7 +661,7 @@ Type "DELETE ALL" to confirm:`;
                   type="text"
                   value={editSubtitle}
                   onChange={(e) => setEditSubtitle(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 />
               </div>
               
@@ -761,7 +672,7 @@ Type "DELETE ALL" to confirm:`;
                 <select
                   value={editCategory}
                   onChange={(e) => setEditCategory(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 >
                   {CATEGORIES.map(cat => (
                     <option key={cat.key} value={cat.key}>

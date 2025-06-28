@@ -51,7 +51,7 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
   throw lastError;
 }
 
-// Helper function to get all categorized media from blob metadata with improved error handling
+// SIMPLIFIED: Get all categorized media from blob metadata - NO CONFIG FILE
 async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -202,44 +202,7 @@ function generateUniqueFileName(category: string, originalName: string, mediaTyp
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Helper function to verify blob metadata after upload
-async function verifyBlobMetadata(pathname: string, expectedMetadata: Record<string, string>): Promise<boolean> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return false;
-
-  try {
-    const { blobs } = await list({
-      prefix: pathname,
-      token,
-      limit: 1
-    });
-
-    if (blobs.length === 0) {
-      console.error(`Verification failed: Blob not found at ${pathname}`);
-      return false;
-    }
-
-    const blob = blobs[0];
-    const metadata = blob.metadata || {};
-
-    // Check critical metadata fields
-    const criticalFields = ['category', 'name', 'type'];
-    for (const field of criticalFields) {
-      if (!metadata[field] || metadata[field] !== expectedMetadata[field]) {
-        console.error(`Verification failed: Missing or incorrect ${field}. Expected: ${expectedMetadata[field]}, Got: ${metadata[field]}`);
-        return false;
-      }
-    }
-
-    console.log(`Verification successful for ${pathname}:`, metadata);
-    return true;
-  } catch (error) {
-    console.error(`Verification error for ${pathname}:`, error);
-    return false;
-  }
-}
-
-// POST handler to upload new categorized media items with GUARANTEED metadata
+// SIMPLIFIED POST handler - NO VERIFICATION, JUST UPLOAD WITH METADATA
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -255,11 +218,9 @@ export async function POST(request: NextRequest) {
     const name = formData.get('name') as string;
     const subtitle = formData.get('subtitle') as string;
 
-    console.log('=== UPLOAD REQUEST RECEIVED ===');
+    console.log('=== SIMPLIFIED UPLOAD REQUEST ===');
     console.log('Files:', mediaFiles.length);
     console.log('Category:', category);
-    console.log('Name:', name);
-    console.log('Subtitle:', subtitle);
 
     if (!mediaFiles || mediaFiles.length === 0) {
       return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
@@ -280,7 +241,7 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with GUARANTEED metadata attachment
+    // Process each file with SIMPLE metadata attachment
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
       const fileName = name || file.name.replace(/\.[^/.]+$/, "");
@@ -288,10 +249,7 @@ export async function POST(request: NextRequest) {
 
       console.log(`\n=== PROCESSING FILE ${i + 1}/${mediaFiles.length} ===`);
       console.log('Original name:', file.name);
-      console.log('File size:', file.size);
-      console.log('File type:', file.type);
       console.log('Display name:', fileName);
-      console.log('Subtitle:', fileSubtitle);
       console.log('Category:', category);
 
       try {
@@ -315,79 +273,31 @@ export async function POST(request: NextRequest) {
         const blobFileName = generateUniqueFileName(category, file.name, mediaType);
         console.log('Generated blob filename:', blobFileName);
 
-        // Prepare COMPREHENSIVE metadata - THIS IS THE CRITICAL FIX
+        // SIMPLE metadata object - only essential fields
         const metadata = {
-          // REQUIRED FIELDS - These MUST be present for the gallery to work
           category: category,
           name: fileName,
           subtitle: fileSubtitle,
           type: mediaType,
-          
-          // ADDITIONAL METADATA for completeness
           originalName: file.name,
-          uploadedBy: 'admin',
-          uploadedAt: new Date().toISOString(),
-          fileSize: file.size.toString(),
-          contentType: file.type,
-          
-          // VERSION for tracking
-          metadataVersion: '2.0'
+          uploadedAt: new Date().toISOString()
         };
 
         console.log('Metadata to attach:', metadata);
 
-        // STEP 1: Upload to blob storage with metadata
-        console.log('Step 1: Uploading to blob storage...');
-        const blob = await retryOperation(async () => {
-          return await put(blobFileName, file, {
-            access: 'public',
-            contentType: file.type,
-            token: token,
-            addRandomSuffix: false,
-            metadata: metadata // CRITICAL: Attach metadata
-          });
-        }, 3);
-
-        console.log('Blob upload result:', {
-          url: blob.url,
-          pathname: blob.pathname
+        // SINGLE UPLOAD ATTEMPT - no verification, no retries
+        console.log('Uploading to blob storage...');
+        const blob = await put(blobFileName, file, {
+          access: 'public',
+          contentType: file.type,
+          token: token,
+          addRandomSuffix: false,
+          metadata: metadata
         });
 
-        // STEP 2: VERIFY metadata was attached correctly
-        console.log('Step 2: Verifying metadata...');
-        const verificationPassed = await verifyBlobMetadata(blobFileName, metadata);
-        
-        if (!verificationPassed) {
-          // If verification fails, try to re-upload with metadata
-          console.warn('Metadata verification failed, attempting re-upload...');
-          
-          try {
-            // Delete the failed upload
-            await del(blob.url, { token });
-            
-            // Re-upload with metadata
-            const retryBlob = await put(blobFileName, file, {
-              access: 'public',
-              contentType: file.type,
-              token: token,
-              addRandomSuffix: false,
-              metadata: metadata
-            });
-            
-            // Verify again
-            const retryVerification = await verifyBlobMetadata(blobFileName, metadata);
-            if (!retryVerification) {
-              throw new Error('Metadata verification failed after retry');
-            }
-            
-            console.log('Re-upload successful with verified metadata');
-          } catch (retryError) {
-            console.error('Re-upload failed:', retryError);
-            throw new Error(`Metadata attachment failed: ${retryError.message}`);
-          }
-        }
+        console.log('✅ Upload successful! Blob URL:', blob.url);
 
-        // STEP 3: Create media object
+        // Create media object
         const newMedia: CategorizedMedia = {
           id: blobFileName.split('/').pop() || blobFileName,
           url: blob.url,
@@ -398,8 +308,6 @@ export async function POST(request: NextRequest) {
           uploadedAt: new Date().toISOString(),
           size: file.size
         };
-
-        console.log('✅ Upload successful! Created media object:', newMedia);
 
         uploadResults.push({
           success: true,
@@ -433,7 +341,6 @@ export async function POST(request: NextRequest) {
     console.log('\n=== UPLOAD PROCESS COMPLETE ===');
     console.log('Success count:', successCount);
     console.log('Failure count:', failureCount);
-    console.log('Message:', message);
 
     return NextResponse.json({ 
       message,
