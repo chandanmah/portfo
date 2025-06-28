@@ -58,15 +58,13 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editSubtitle, setEditSubtitle] = useState('');
   const [editCategory, setEditCategory] = useState('');
-  const [lastSync, setLastSync] = useState<string>(new Date().toISOString());
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
   
-  // Refs for real-time updates
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Refs for preventing infinite loops
   const isComponentMountedRef = useRef(true);
-  const lastFetchTimestamp = useRef<string>('');
+  const fetchingRef = useRef(false);
 
   const buttonStyle = "px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
 
@@ -76,10 +74,20 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setTimeout(() => setNotification(null), 5000);
   }, []);
 
-  // Fetch categorized gallery data with improved error handling
+  // Fetch categorized gallery data - stable function with no dependencies
   const fetchCategorizedData = useCallback(async (showLoadingState = true) => {
+    // Prevent multiple simultaneous fetches
+    if (fetchingRef.current) {
+      console.log('Fetch already in progress, skipping...');
+      return;
+    }
+
+    fetchingRef.current = true;
+
     try {
-      if (showLoadingState) setLoading(true);
+      if (showLoadingState && isComponentMountedRef.current) {
+        setLoading(true);
+      }
       
       // Add cache-busting timestamp
       const timestamp = Date.now();
@@ -99,8 +107,6 @@ const CategorizedGalleryAdmin: React.FC = () => {
         
         if (isComponentMountedRef.current) {
           setCategoryData(categoryData);
-          setLastSync(new Date().toISOString());
-          lastFetchTimestamp.current = _metadata?.lastUpdated || new Date().toISOString();
           
           if (_metadata) {
             console.log('Gallery data loaded:', {
@@ -113,48 +119,22 @@ const CategorizedGalleryAdmin: React.FC = () => {
       } else {
         const errorData = await response.json();
         console.error('Failed to fetch categorized gallery data:', errorData);
-        showNotification(`Failed to fetch gallery data: ${errorData.message}`, 'error');
+        if (isComponentMountedRef.current) {
+          showNotification(`Failed to fetch gallery data: ${errorData.message}`, 'error');
+        }
       }
     } catch (error) {
       console.error('Error fetching categorized gallery data:', error);
-      showNotification('Error fetching gallery data', 'error');
+      if (isComponentMountedRef.current) {
+        showNotification('Error fetching gallery data', 'error');
+      }
     } finally {
+      fetchingRef.current = false;
       if (showLoadingState && isComponentMountedRef.current) {
         setLoading(false);
       }
     }
-  }, [showNotification]);
-
-  // Real-time sync function with improved change detection
-  const syncData = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/admin/categorized-gallery/sync?lastSync=${encodeURIComponent(lastSync)}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-      
-      if (response.ok) {
-        const { data, changes, lastSync: newLastSync, hasChanges } = await response.json();
-        
-        if (hasChanges && isComponentMountedRef.current) {
-          // Extract metadata if present
-          const { _metadata, ...categoryData } = data;
-          
-          setCategoryData(categoryData);
-          setLastSync(newLastSync);
-          
-          if (changes.length > 0) {
-            showNotification(`${changes.length} item(s) updated`, 'info');
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error syncing data:', error);
-    }
-  }, [lastSync, showNotification]);
+  }, [showNotification]); // Only depend on showNotification which is stable
 
   // Debug function to diagnose issues
   const runDiagnostics = useCallback(async () => {
@@ -204,23 +184,18 @@ const CategorizedGalleryAdmin: React.FC = () => {
     }
   }, [showNotification, fetchCategorizedData]);
 
-  // Setup real-time updates
+  // Initial data fetch - only run once on mount
   useEffect(() => {
     isComponentMountedRef.current = true;
     
     // Initial fetch
     fetchCategorizedData();
 
-    // Setup periodic sync (every 5 seconds)
-    syncIntervalRef.current = setInterval(syncData, 5000);
-
     return () => {
       isComponentMountedRef.current = false;
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
+      fetchingRef.current = false;
     };
-  }, [fetchCategorizedData, syncData]);
+  }, []); // Empty dependency array - only run once
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
