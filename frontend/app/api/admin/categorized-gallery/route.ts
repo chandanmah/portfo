@@ -4,6 +4,11 @@ export const config = {
   api: {
     bodyParser: false,
   },
+  // Specifies the maximum allowed size for the request body. Setting to 50mb for video uploads.
+  // This is a common workaround for large file uploads in Next.js API routes.
+  bodyParser: {
+    sizeLimit: '50mb',
+  },
 };
 import { put, del, list } from '@vercel/blob';
 
