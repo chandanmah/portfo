@@ -106,7 +106,15 @@ fetchCategorizedData();
       temp: true
     }));
     
-    setCategoryData(prev => ({...prev,[selectedCategory]: [...(prev[selectedCategory] || []), ...tempItems]
+    setCategoryData(prev => ({
+      ...prev,
+      [selectedCategory]: [
+        ...(prev[selectedCategory] || []),
+        ...tempItems.map(item => ({
+          ...item,
+          type: item.type === 'video' ? 'video' : 'image'
+        } as CategorizedMedia))
+      ]
     }));
 
     const uploadPromises = [];
@@ -149,13 +157,13 @@ fetchCategorizedData();
         purgeCache();
 setPendingOperations(prev => new Set([...prev, 'fetch']));
 setTimeout(() => {
-  fetchCategorizedData(attempt + 1)
+fetchCategorizedData()
     .finally(() => setPendingOperations(prev => {
       const next = new Set(prev);
       next.delete('fetch');
       return next;
     }));
-}, Math.min(1000 * attempt, 5000)); // Increased delay for server-side processing
+}, 1000); // Fixed delay for server-side processing
       } else {
         alert('Some uploads failed. Please try again.');
       }
