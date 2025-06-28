@@ -331,22 +331,32 @@ export async function GET() {
   }
 }
 
-// Helper function to validate file
+// Helper function to validate file - ENHANCED for video support
 function validateFile(file: File): { isValid: boolean; error?: string } {
-  const maxSize = 50 * 1024 * 1024; // 50MB
+  const maxSize = 100 * 1024 * 1024; // Increased to 100MB for videos
   const allowedTypes = [
-    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
-    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'
+    // Images
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml',
+    // Videos - EXPANDED support
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/avi', 
+    'video/x-ms-wmv', 'video/wmv', 'video/x-flv', 'video/3gpp', 'video/ogg'
   ];
 
+  console.log(`🔍 Validating file: ${file.name}`);
+  console.log(`📏 Size: ${file.size} bytes (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+  console.log(`🎭 Type: ${file.type}`);
+
   if (file.size > maxSize) {
-    return { isValid: false, error: 'File size exceeds 50MB limit' };
+    const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+    const maxSizeMB = (maxSize / 1024 / 1024).toFixed(0);
+    return { isValid: false, error: `File size (${sizeMB}MB) exceeds ${maxSizeMB}MB limit` };
   }
 
   if (!allowedTypes.includes(file.type)) {
-    return { isValid: false, error: 'Invalid file type. Only images and videos are allowed.' };
+    return { isValid: false, error: `Invalid file type: ${file.type}. Only images and videos are allowed.` };
   }
 
+  console.log(`✅ File validation passed`);
   return { isValid: true };
 }
 
@@ -369,7 +379,7 @@ function generateCategorizedFileName(category: string, originalName: string, med
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// BULLETPROOF POST handler - filename-based approach
+// BULLETPROOF POST handler - FIXED for video uploads
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -377,7 +387,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const formData = await request.formData();
+    console.log('\n🚀 BULLETPROOF UPLOAD PROCESS STARTED');
+
+    // SAFE FormData parsing with error handling
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+      console.log('✅ FormData parsed successfully');
+    } catch (formDataError: any) {
+      console.error('❌ FormData parsing failed:', formDataError);
+      return NextResponse.json({ 
+        message: 'Failed to parse form data',
+        error: formDataError.message,
+        timestamp: new Date().toISOString()
+      }, { status: 400 });
+    }
     
     // Handle both single and multiple file uploads
     const mediaFiles = formData.getAll('media') as File[];
@@ -385,7 +409,6 @@ export async function POST(request: NextRequest) {
     const name = formData.get('name') as string;
     const subtitle = formData.get('subtitle') as string;
 
-    console.log('\n🚀 BULLETPROOF UPLOAD PROCESS STARTED');
     console.log('📁 Files:', mediaFiles.length);
     console.log('📂 Category:', category);
 
@@ -419,7 +442,7 @@ export async function POST(request: NextRequest) {
       console.log('🎭 Type:', file.type);
 
       try {
-        // Validate file
+        // Validate file - ENHANCED for videos
         const validation = validateFile(file);
         if (!validation.isValid) {
           console.error('❌ File validation failed:', validation.error);
@@ -432,29 +455,43 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Determine media type
+        // Determine media type - ENHANCED for videos
         const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
+        console.log(`🎬 Determined media type: ${mediaType}`);
         
         // Generate BULLETPROOF filename with category embedded
         const blobFileName = generateCategorizedFileName(category, file.name, mediaType);
         console.log('🏷️ Generated bulletproof filename:', blobFileName);
 
-        // Upload with minimal metadata (just for backup, not relied upon)
+        // SAFE blob upload with enhanced error handling
         console.log('⬆️ Uploading to blob storage...');
-        const blob = await retryOperation(async () => {
-          return await put(blobFileName, file, {
-            access: 'public',
-            contentType: file.type,
-            token: token,
-            addRandomSuffix: false,
-            // Minimal metadata - not relied upon for functionality
-            metadata: {
-              category: category,
-              originalName: file.name,
-              uploadedAt: new Date().toISOString()
-            }
+        let blob;
+        try {
+          blob = await retryOperation(async () => {
+            return await put(blobFileName, file, {
+              access: 'public',
+              contentType: file.type,
+              token: token,
+              addRandomSuffix: false,
+              // Minimal metadata - not relied upon for functionality
+              metadata: {
+                category: category,
+                originalName: file.name,
+                uploadedAt: new Date().toISOString(),
+                type: mediaType
+              }
+            });
+          }, 3);
+        } catch (uploadError: any) {
+          console.error('❌ Blob upload failed:', uploadError);
+          uploadResults.push({
+            success: false,
+            error: `Upload failed: ${uploadError.message}`,
+            fileName: file.name,
+            originalName: file.name
           });
-        }, 3);
+          continue;
+        }
 
         console.log('✅ Upload successful!');
         console.log('🔗 Blob URL:', blob.url);
@@ -517,30 +554,47 @@ export async function POST(request: NextRequest) {
     console.log('✅ Success count:', successCount);
     console.log('❌ Failure count:', failureCount);
 
-    return NextResponse.json({ 
+    // SAFE JSON response with proper error handling
+    const responseData = { 
       message,
       results: uploadResults,
       successCount,
       failureCount,
       timestamp: new Date().toISOString()
-    }, {
+    };
+
+    console.log('📤 Sending response:', JSON.stringify(responseData, null, 2));
+
+    return NextResponse.json(responseData, {
       status: successCount > 0 ? 200 : 400,
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
         'Surrogate-Control': 'no-store',
-        'X-Timestamp': new Date().toISOString()
+        'X-Timestamp': new Date().toISOString(),
+        'Content-Type': 'application/json'
       }
     });
 
   } catch (error: any) {
     console.error('❌ Error in POST /api/admin/categorized-gallery:', error);
-    return NextResponse.json({ 
+    
+    // SAFE error response
+    const errorResponse = { 
       message: 'Error uploading media', 
-      error: error.message,
+      error: error.message || 'Unknown error',
       timestamp: new Date().toISOString()
-    }, { status: 500 });
+    };
+
+    console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
+
+    return NextResponse.json(errorResponse, { 
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 }
 
