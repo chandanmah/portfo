@@ -2,7 +2,8 @@
 
 import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import CategorizedGalleryAdmin from '@/components/categorizedgalleryadmin';
+import CategorizedGalleryAdmin from '@/components/CategorizedGalleryAdmin';
+
 
 interface AvatarData {
   avatarUrl: string;
