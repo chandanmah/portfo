@@ -51,7 +51,7 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
   throw lastError;
 }
 
-// SIMPLIFIED: Get all categorized media from blob metadata - NO CONFIG FILE
+// FIXED: Get all categorized media from blob metadata with better error handling
 async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -61,6 +61,8 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
 
   try {
     return await retryOperation(async () => {
+      console.log('🔍 Reading categorized data from blobs...');
+      
       // List all blobs with categorized-gallery prefix
       const { blobs } = await list({
         prefix: 'categorized-gallery/',
@@ -68,40 +70,85 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
         limit: 1000
       });
 
-      console.log(`Found ${blobs.length} categorized gallery blobs`);
+      console.log(`📁 Found ${blobs.length} categorized gallery blobs`);
 
       const categoryData: CategoryData = {};
       const processedIds = new Set<string>();
+      let validItems = 0;
+      let invalidItems = 0;
 
       for (const blob of blobs) {
         try {
+          console.log(`\n🔍 Processing blob: ${blob.pathname}`);
+          console.log(`📊 Blob metadata:`, blob.metadata);
+          console.log(`📅 Upload date: ${blob.uploadedAt}`);
+          console.log(`📏 Size: ${blob.size} bytes`);
+          console.log(`🎭 Content type: ${blob.contentType}`);
+
           // Extract media info from blob metadata
           const metadata = blob.metadata || {};
-          const category = metadata.category as string;
-          const name = metadata.name as string;
-          const subtitle = metadata.subtitle as string;
-          const type = metadata.type as 'image' | 'video';
-          const width = metadata.width ? parseInt(metadata.width as string) : undefined;
-          const height = metadata.height ? parseInt(metadata.height as string) : undefined;
+          
+          // CRITICAL FIX: Handle both string and direct metadata access
+          let category: string;
+          let name: string;
+          let subtitle: string;
+          let type: 'image' | 'video';
+          
+          // Try different ways to access metadata (Vercel Blob sometimes stores it differently)
+          if (typeof metadata === 'string') {
+            try {
+              const parsedMetadata = JSON.parse(metadata);
+              category = parsedMetadata.category;
+              name = parsedMetadata.name;
+              subtitle = parsedMetadata.subtitle || '';
+              type = parsedMetadata.type;
+            } catch (parseError) {
+              console.warn(`❌ Could not parse metadata string for ${blob.pathname}:`, metadata);
+              invalidItems++;
+              continue;
+            }
+          } else {
+            category = metadata.category as string;
+            name = metadata.name as string;
+            subtitle = (metadata.subtitle as string) || '';
+            type = metadata.type as 'image' | 'video';
+          }
+
+          console.log(`📝 Extracted metadata:`, { category, name, subtitle, type });
 
           // Generate unique ID from pathname
           const id = blob.pathname.split('/').pop() || blob.pathname;
           
           // Skip duplicates
           if (processedIds.has(id)) {
-            console.warn(`Duplicate blob ID found: ${id}`);
+            console.warn(`⚠️ Duplicate blob ID found: ${id}`);
             continue;
           }
           processedIds.add(id);
 
           // Validate category
-          if (!category || !VALID_CATEGORIES.includes(category)) {
-            console.warn(`Invalid or missing category for blob ${blob.pathname}: ${category}`, metadata);
+          if (!category) {
+            console.warn(`❌ Missing category for blob ${blob.pathname}`);
+            invalidItems++;
+            continue;
+          }
+          
+          if (!VALID_CATEGORIES.includes(category)) {
+            console.warn(`❌ Invalid category for blob ${blob.pathname}: ${category}`);
+            invalidItems++;
             continue;
           }
 
+          // Initialize category array if needed
           if (!categoryData[category]) {
             categoryData[category] = [];
+            console.log(`📂 Created new category: ${category}`);
+          }
+
+          // Determine type from content type if not in metadata
+          if (!type) {
+            type = blob.contentType?.startsWith('video/') ? 'video' : 'image';
+            console.log(`🎭 Inferred type from content-type: ${type}`);
           }
 
           const mediaItem: CategorizedMedia = {
@@ -110,17 +157,19 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
             name: name || id.replace(/\.[^/.]+$/, '') || 'Untitled',
             subtitle: subtitle || '',
             category,
-            type: type || (blob.contentType?.startsWith('video/') ? 'video' : 'image'),
-            width,
-            height,
+            type,
+            width: metadata.width ? parseInt(metadata.width as string) : undefined,
+            height: metadata.height ? parseInt(metadata.height as string) : undefined,
             uploadedAt: blob.uploadedAt,
             size: blob.size
           };
 
           categoryData[category].push(mediaItem);
-          console.log(`Processed media item: ${mediaItem.name} in ${category}`);
+          validItems++;
+          console.log(`✅ Successfully processed: ${mediaItem.name} in ${category}`);
         } catch (error) {
-          console.warn(`Error processing blob ${blob.pathname}:`, error);
+          console.warn(`❌ Error processing blob ${blob.pathname}:`, error);
+          invalidItems++;
         }
       }
 
@@ -129,14 +178,19 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
         categoryData[category].sort((a, b) => 
           new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
         );
+        console.log(`📂 Category ${category}: ${categoryData[category].length} items`);
       });
 
-      console.log('Final category data:', Object.keys(categoryData).map(cat => `${cat}: ${categoryData[cat].length} items`));
+      console.log(`\n📊 PROCESSING SUMMARY:`);
+      console.log(`✅ Valid items: ${validItems}`);
+      console.log(`❌ Invalid items: ${invalidItems}`);
+      console.log(`📂 Categories found: ${Object.keys(categoryData).length}`);
+      console.log(`📁 Categories:`, Object.keys(categoryData).map(cat => `${cat}: ${categoryData[cat].length} items`));
 
       return categoryData;
     });
   } catch (error: any) {
-    console.error('Error reading categorized data from blobs:', error);
+    console.error('❌ Error reading categorized data from blobs:', error);
     return {};
   }
 }
@@ -144,16 +198,22 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
 // GET handler to retrieve all categorized gallery data
 export async function GET() {
   try {
+    console.log('\n🚀 GET /api/admin/categorized-gallery called');
+    
     const data = await readCategorizedDataFromBlobs();
     
     // Add cache-busting timestamp
     const timestamp = new Date().toISOString();
+    const totalItems = Object.values(data).reduce((sum, items) => sum + items.length, 0);
+    
+    console.log(`📊 Returning data: ${totalItems} total items across ${Object.keys(data).length} categories`);
     
     return NextResponse.json({
       ...data,
       _metadata: {
         lastUpdated: timestamp,
-        totalItems: Object.values(data).reduce((sum, items) => sum + items.length, 0)
+        totalItems: totalItems,
+        categories: Object.keys(data).length
       }
     }, {
       headers: {
@@ -165,7 +225,7 @@ export async function GET() {
       }
     });
   } catch (error) {
-    console.error('Error in GET /api/admin/categorized-gallery:', error);
+    console.error('❌ Error in GET /api/admin/categorized-gallery:', error);
     return NextResponse.json({ 
       message: 'Error reading categorized gallery data',
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -202,7 +262,7 @@ function generateUniqueFileName(category: string, originalName: string, mediaTyp
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// SIMPLIFIED POST handler - NO VERIFICATION, JUST UPLOAD WITH METADATA
+// FIXED POST handler with better metadata handling
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -218,9 +278,11 @@ export async function POST(request: NextRequest) {
     const name = formData.get('name') as string;
     const subtitle = formData.get('subtitle') as string;
 
-    console.log('=== SIMPLIFIED UPLOAD REQUEST ===');
-    console.log('Files:', mediaFiles.length);
-    console.log('Category:', category);
+    console.log('\n🚀 UPLOAD REQUEST RECEIVED');
+    console.log('📁 Files:', mediaFiles.length);
+    console.log('📂 Category:', category);
+    console.log('📝 Name:', name);
+    console.log('📄 Subtitle:', subtitle);
 
     if (!mediaFiles || mediaFiles.length === 0) {
       return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
@@ -241,22 +303,24 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with SIMPLE metadata attachment
+    // Process each file with EXPLICIT metadata handling
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
       const fileName = name || file.name.replace(/\.[^/.]+$/, "");
       const fileSubtitle = subtitle || '';
 
-      console.log(`\n=== PROCESSING FILE ${i + 1}/${mediaFiles.length} ===`);
-      console.log('Original name:', file.name);
-      console.log('Display name:', fileName);
-      console.log('Category:', category);
+      console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length}`);
+      console.log('📄 Original name:', file.name);
+      console.log('📝 Display name:', fileName);
+      console.log('📂 Category:', category);
+      console.log('📏 Size:', file.size, 'bytes');
+      console.log('🎭 Type:', file.type);
 
       try {
         // Validate file
         const validation = validateFile(file);
         if (!validation.isValid) {
-          console.error('File validation failed:', validation.error);
+          console.error('❌ File validation failed:', validation.error);
           uploadResults.push({
             success: false,
             error: validation.error,
@@ -271,22 +335,22 @@ export async function POST(request: NextRequest) {
         
         // Generate unique filename
         const blobFileName = generateUniqueFileName(category, file.name, mediaType);
-        console.log('Generated blob filename:', blobFileName);
+        console.log('🏷️ Generated blob filename:', blobFileName);
 
-        // SIMPLE metadata object - only essential fields
+        // EXPLICIT metadata object with string values only
         const metadata = {
-          category: category,
-          name: fileName,
-          subtitle: fileSubtitle,
-          type: mediaType,
-          originalName: file.name,
-          uploadedAt: new Date().toISOString()
+          category: String(category),
+          name: String(fileName),
+          subtitle: String(fileSubtitle),
+          type: String(mediaType),
+          originalName: String(file.name),
+          uploadedAt: String(new Date().toISOString())
         };
 
-        console.log('Metadata to attach:', metadata);
+        console.log('📊 Metadata to attach:', metadata);
 
-        // SINGLE UPLOAD ATTEMPT - no verification, no retries
-        console.log('Uploading to blob storage...');
+        // Upload with explicit metadata
+        console.log('⬆️ Uploading to blob storage...');
         const blob = await put(blobFileName, file, {
           access: 'public',
           contentType: file.type,
@@ -295,7 +359,28 @@ export async function POST(request: NextRequest) {
           metadata: metadata
         });
 
-        console.log('✅ Upload successful! Blob URL:', blob.url);
+        console.log('✅ Upload successful!');
+        console.log('🔗 Blob URL:', blob.url);
+        console.log('📊 Returned metadata:', blob.metadata);
+
+        // Verify metadata was attached by listing the blob
+        console.log('🔍 Verifying metadata attachment...');
+        try {
+          const { blobs } = await list({
+            prefix: blobFileName,
+            token,
+            limit: 1
+          });
+          
+          if (blobs.length > 0) {
+            console.log('✅ Verification successful!');
+            console.log('📊 Verified metadata:', blobs[0].metadata);
+          } else {
+            console.warn('⚠️ Could not find uploaded blob for verification');
+          }
+        } catch (verifyError) {
+          console.warn('⚠️ Could not verify metadata:', verifyError);
+        }
 
         // Create media object
         const newMedia: CategorizedMedia = {
@@ -338,9 +423,9 @@ export async function POST(request: NextRequest) {
       message = `All ${failureCount} uploads failed`;
     }
 
-    console.log('\n=== UPLOAD PROCESS COMPLETE ===');
-    console.log('Success count:', successCount);
-    console.log('Failure count:', failureCount);
+    console.log('\n📊 UPLOAD PROCESS COMPLETE');
+    console.log('✅ Success count:', successCount);
+    console.log('❌ Failure count:', failureCount);
 
     return NextResponse.json({ 
       message,
