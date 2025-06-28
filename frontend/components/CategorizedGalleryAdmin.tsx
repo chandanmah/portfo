@@ -61,6 +61,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [clearing, setClearing] = useState(false);
   
   // Refs for preventing infinite loops
   const isComponentMountedRef = useRef(true);
@@ -186,6 +187,54 @@ const CategorizedGalleryAdmin: React.FC = () => {
       showNotification('Error fixing metadata', 'error');
     }
   }, [showNotification, fetchCategorizedData, runDiagnostics]);
+
+  // Clear all blobs function
+  const clearAllBlobs = useCallback(async () => {
+    const confirmMessage = `⚠️ DANGER: This will permanently delete ALL images and files from your blob storage!
+
+This action cannot be undone. Are you absolutely sure you want to proceed?
+
+Type "DELETE ALL" to confirm:`;
+    
+    const userInput = prompt(confirmMessage);
+    
+    if (userInput !== 'DELETE ALL') {
+      showNotification('Clear operation cancelled', 'info');
+      return;
+    }
+
+    setClearing(true);
+    
+    try {
+      const response = await fetch('/api/admin/categorized-gallery/clear', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'clear-all-blobs' })
+      });
+      
+      if (response.ok) {
+        const results = await response.json();
+        showNotification(`Successfully deleted ${results.deleted} blob(s)`, 'success');
+        
+        // Clear local state
+        setCategoryData({});
+        setDebugInfo(null);
+        
+        // Refresh data
+        await fetchCategorizedData(false);
+      } else {
+        const error = await response.json();
+        showNotification(`Error clearing blobs: ${error.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('Error clearing blobs:', error);
+      showNotification('Error clearing blobs', 'error');
+    } finally {
+      setClearing(false);
+    }
+  }, [showNotification, fetchCategorizedData]);
 
   // Initial data fetch - only run once on mount
   useEffect(() => {
@@ -432,7 +481,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
       {/* Debug Panel */}
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
         <h3 className="text-lg font-semibold mb-2 text-yellow-800">Diagnostics & Troubleshooting</h3>
-        <div className="flex space-x-3 mb-3">
+        <div className="flex flex-wrap gap-3 mb-3">
           <button
             onClick={runDiagnostics}
             className={`${buttonStyle} bg-yellow-500 hover:bg-yellow-600 text-white text-sm`}
@@ -453,6 +502,20 @@ const CategorizedGalleryAdmin: React.FC = () => {
           >
             {showDebug ? 'Hide' : 'Show'} Debug Info
           </button>
+          <button
+            onClick={clearAllBlobs}
+            disabled={clearing}
+            className={`${buttonStyle} bg-red-600 hover:bg-red-700 text-white text-sm disabled:bg-gray-400 disabled:cursor-not-allowed`}
+          >
+            {clearing ? 'Clearing...' : '🗑️ Clear All Blobs'}
+          </button>
+        </div>
+        
+        <div className="bg-red-50 border border-red-200 rounded p-3 mb-3">
+          <p className="text-red-800 text-sm">
+            <strong>⚠️ Clear All Blobs:</strong> This will permanently delete ALL files from your blob storage. 
+            Use this to start fresh if you have metadata issues or want to clean up old uploads.
+          </p>
         </div>
         
         {showDebug && debugInfo && (
