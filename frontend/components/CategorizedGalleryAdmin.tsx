@@ -148,8 +148,8 @@ const CategorizedGalleryAdmin: React.FC = () => {
         setDebugInfo(diagnostics);
         setShowDebug(true);
         
-        if (diagnostics.metadataIssues.length > 0) {
-          showNotification(`Found ${diagnostics.metadataIssues.length} metadata issues`, 'error');
+        if (diagnostics.diagnostics.metadataIssues.length > 0) {
+          showNotification(`Found ${diagnostics.diagnostics.metadataIssues.length} metadata issues`, 'error');
         } else {
           showNotification('No issues found', 'success');
         }
@@ -177,12 +177,15 @@ const CategorizedGalleryAdmin: React.FC = () => {
         
         // Refresh data after fixing
         await fetchCategorizedData(false);
+        
+        // Re-run diagnostics
+        await runDiagnostics();
       }
     } catch (error) {
       console.error('Error fixing metadata:', error);
       showNotification('Error fixing metadata', 'error');
     }
-  }, [showNotification, fetchCategorizedData]);
+  }, [showNotification, fetchCategorizedData, runDiagnostics]);
 
   // Initial data fetch - only run once on mount
   useEffect(() => {
@@ -223,83 +226,101 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress(newUploadProgress);
 
     try {
-      const formData = new FormData();
+      // Upload files one by one for better progress tracking
+      const results: UploadResult[] = [];
       
-      // Add all files and their metadata
-      Array.from(selectedFiles).forEach((file, index) => {
-        formData.append('media', file);
-        formData.append('name', file.name.split('.')[0]);
-        formData.append('subtitle', '');
-      });
-      formData.append('category', selectedCategory);
-
-      const response = await fetch('/api/admin/categorized-gallery', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        const { results, successCount, failureCount } = result;
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
         
-        // Update progress for each file
-        const updatedProgress = { ...newUploadProgress };
-        results.forEach((uploadResult: UploadResult) => {
-          const fileName = uploadResult.originalName || uploadResult.fileName || uploadResult.media?.name || 'Unknown';
-          if (updatedProgress[fileName]) {
-            updatedProgress[fileName] = {
-              progress: 100,
-              status: uploadResult.success ? 'success' : 'error',
-              error: uploadResult.error
-            };
+        try {
+          // Update progress to show starting
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: { progress: 10, status: 'uploading' }
+          }));
+
+          const formData = new FormData();
+          formData.append('media', file);
+          formData.append('category', selectedCategory);
+          formData.append('name', file.name.split('.')[0]);
+          formData.append('subtitle', '');
+
+          const response = await fetch('/api/admin/categorized-gallery', {
+            method: 'POST',
+            body: formData,
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.results && result.results[0]) {
+            const uploadResult = result.results[0];
+            results.push(uploadResult);
+            
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: { 
+                progress: 100, 
+                status: uploadResult.success ? 'success' : 'error',
+                error: uploadResult.error
+              }
+            }));
+          } else {
+            results.push({
+              success: false,
+              error: result.message || 'Upload failed',
+              originalName: file.name
+            });
+            
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: { 
+                progress: 0, 
+                status: 'error',
+                error: result.message || 'Upload failed'
+              }
+            }));
           }
-        });
-        setUploadProgress(updatedProgress);
-
-        if (successCount > 0) {
-          showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
-          setSelectedFiles(null);
+        } catch (error: any) {
+          console.error(`Error uploading ${file.name}:`, error);
+          results.push({
+            success: false,
+            error: error.message || 'Network error',
+            originalName: file.name
+          });
           
-          // Clear the file input
-          const fileInput = document.getElementById('media-upload') as HTMLInputElement;
-          if (fileInput) fileInput.value = '';
-          
-          // Refresh data immediately
-          await fetchCategorizedData(false);
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: { 
+              progress: 0, 
+              status: 'error',
+              error: error.message || 'Network error'
+            }
+          }));
         }
-
-        if (failureCount > 0) {
-          showNotification(`${failureCount} upload(s) failed`, 'error');
-        }
-      } else {
-        showNotification(result.message || 'Upload failed', 'error');
-        
-        // Mark all as failed
-        const updatedProgress = { ...newUploadProgress };
-        Object.keys(updatedProgress).forEach(fileName => {
-          updatedProgress[fileName] = {
-            progress: 0,
-            status: 'error',
-            error: result.message || 'Upload failed'
-          };
-        });
-        setUploadProgress(updatedProgress);
       }
+
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+
+      if (successCount > 0) {
+        showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
+        setSelectedFiles(null);
+        
+        // Clear the file input
+        const fileInput = document.getElementById('media-upload') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+        
+        // Refresh data immediately
+        await fetchCategorizedData(false);
+      }
+
+      if (failureCount > 0) {
+        showNotification(`${failureCount} upload(s) failed`, 'error');
+      }
+
     } catch (error) {
       console.error('Error uploading media:', error);
       showNotification('Error uploading media', 'error');
-      
-      // Mark all as failed
-      const updatedProgress = { ...newUploadProgress };
-      Object.keys(updatedProgress).forEach(fileName => {
-        updatedProgress[fileName] = {
-          progress: 0,
-          status: 'error',
-          error: 'Network error'
-        };
-      });
-      setUploadProgress(updatedProgress);
     } finally {
       setUploading(false);
       
@@ -408,6 +429,77 @@ const CategorizedGalleryAdmin: React.FC = () => {
         </div>
       )}
 
+      {/* Debug Panel */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <h3 className="text-lg font-semibold mb-2 text-yellow-800">Diagnostics & Troubleshooting</h3>
+        <div className="flex space-x-3 mb-3">
+          <button
+            onClick={runDiagnostics}
+            className={`${buttonStyle} bg-yellow-500 hover:bg-yellow-600 text-white text-sm`}
+          >
+            Run Diagnostics
+          </button>
+          {debugInfo && debugInfo.diagnostics.metadataIssues.length > 0 && (
+            <button
+              onClick={fixMetadataIssues}
+              className={`${buttonStyle} bg-orange-500 hover:bg-orange-600 text-white text-sm`}
+            >
+              Fix Issues
+            </button>
+          )}
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className={`${buttonStyle} bg-gray-500 hover:bg-gray-600 text-white text-sm`}
+          >
+            {showDebug ? 'Hide' : 'Show'} Debug Info
+          </button>
+        </div>
+        
+        {showDebug && debugInfo && (
+          <div className="bg-white p-4 rounded border text-sm">
+            <h4 className="font-semibold mb-2">Debug Information:</h4>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <strong>Total Blobs:</strong> {debugInfo.diagnostics.totalBlobs}
+              </div>
+              <div>
+                <strong>Categorized:</strong> {debugInfo.diagnostics.categorizedBlobs}
+              </div>
+              <div>
+                <strong>Orphaned:</strong> {debugInfo.diagnostics.orphanedBlobs}
+              </div>
+              <div>
+                <strong>Issues:</strong> {debugInfo.diagnostics.metadataIssues.length}
+              </div>
+            </div>
+            
+            {debugInfo.diagnostics.metadataIssues.length > 0 && (
+              <div className="mb-4">
+                <strong>Issues Found:</strong>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  {debugInfo.diagnostics.metadataIssues.slice(0, 5).map((issue: any, index: number) => (
+                    <li key={index} className="text-red-600">
+                      {issue.pathname}: {issue.issue}
+                    </li>
+                  ))}
+                  {debugInfo.diagnostics.metadataIssues.length > 5 && (
+                    <li className="text-gray-500">...and {debugInfo.diagnostics.metadataIssues.length - 5} more</li>
+                  )}
+                </ul>
+              </div>
+            )}
+            
+            <div>
+              <strong>Recommendations:</strong>
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                {debugInfo.recommendations.map((rec: string, index: number) => (
+                  <li key={index} className="text-blue-600">{rec}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
       
       {/* Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
