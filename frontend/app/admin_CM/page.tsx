@@ -3,10 +3,6 @@
 import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import CategorizedGalleryAdmin from '@/components/CategorizedGalleryAdmin';
-<<<<<<< HEAD
-
-=======
->>>>>>> e3fa18fb68bf159030ed109e761ef73479b86883
 
 interface AvatarData {
   avatarUrl: string;
