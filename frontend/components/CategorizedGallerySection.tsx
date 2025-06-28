@@ -71,7 +71,7 @@ const CategorizedGallerySection: React.FC = () => {
   const [playingVideos, setPlayingVideos] = useState<Record<string, boolean>>({});
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
-  const [lastSync, setLastSync] = useState<string>(new Date().toISOString());
+  const [lastSync, setLastSync] = useState<string>('');
   
   // Refs for real-time updates
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -117,7 +117,7 @@ const CategorizedGallerySection: React.FC = () => {
     }
   }, [isModalOpen, selectedMedia]);
 
-  // Fetch categorized gallery data
+  // Fetch categorized gallery data - memoized to prevent infinite loops
   const fetchCategoryData = useCallback(async (showLoadingState = true) => {
     if (showLoadingState) {
       setIsLoading(true);
@@ -154,10 +154,12 @@ const CategorizedGallerySection: React.FC = () => {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, []); // Empty dependency array since this function doesn't depend on any state
 
-  // Real-time sync function for public gallery
+  // Real-time sync function for public gallery - memoized to prevent infinite loops
   const syncData = useCallback(async () => {
+    if (!lastSync) return; // Don't sync if we haven't done initial fetch
+    
     try {
       const response = await fetch(`/api/admin/categorized-gallery/sync?lastSync=${encodeURIComponent(lastSync)}`, {
         cache: 'no-store',
@@ -178,7 +180,7 @@ const CategorizedGallerySection: React.FC = () => {
     } catch (error) {
       console.error('Error syncing gallery data:', error);
     }
-  }, [lastSync]);
+  }, [lastSync]); // Only depend on lastSync
 
   // Setup real-time updates
   useEffect(() => {
@@ -187,16 +189,28 @@ const CategorizedGallerySection: React.FC = () => {
     // Initial fetch
     fetchCategoryData();
 
-    // Setup periodic sync (every 10 seconds for public gallery)
-    syncIntervalRef.current = setInterval(syncData, 10000);
-
     return () => {
       isComponentMountedRef.current = false;
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
       }
     };
-  }, [fetchCategoryData, syncData]);
+  }, []); // Empty dependency array for initial setup
+
+  // Separate effect for sync interval to avoid recreating it
+  useEffect(() => {
+    if (lastSync && !syncIntervalRef.current) {
+      // Setup periodic sync (every 10 seconds for public gallery)
+      syncIntervalRef.current = setInterval(syncData, 10000);
+    }
+
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [lastSync, syncData]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
