@@ -325,10 +325,11 @@ export async function GET() {
       }
     }, {
       headers: {
+
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Surrogate-Control': 'no-store',
+         'Pragma': 'no-cache',
+         'Expires': '0',
+         'Surrogate-Control': 'no-store',
         'X-Timestamp': timestamp
       }
     });
@@ -593,24 +594,23 @@ export async function POST(request: NextRequest) {
     
     // SAFE error response
     const errorResponse = { 
-      message: 'Error uploading media', 
-      error: error.message || 'Unknown error',
-      timestamp: new Date().toISOString()
-    };
-
-    console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
-
-    return NextResponse.json(errorResponse, {
-      status: 500,
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Surrogate-Control': 'no-store',
-        'X-Timestamp': new Date().toISOString(),
-        'Content-Type': 'application/json'
-      }
-    });
+       message: 'Error uploading media', 
+       error: error.message || 'Unknown error',
+       timestamp: new Date().toISOString()
+     };
+     console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
+     return NextResponse.json(errorResponse, {
+       status: 500,
+       headers: {
+         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+         'Pragma': 'no-cache',
+         'Expires': '0',
+         'Surrogate-Control': 'no-store',
+         'X-Timestamp': new Date().toISOString(),
+         'Content-Type': 'application/json'
+       }
+     });
+    
   }
 }
 
