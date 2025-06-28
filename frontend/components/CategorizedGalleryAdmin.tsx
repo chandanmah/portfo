@@ -25,6 +25,7 @@ interface UploadResult {
   media?: CategorizedMedia;
   error?: string;
   fileName?: string;
+  originalName?: string;
 }
 
 interface UploadProgress {
@@ -57,12 +58,13 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editSubtitle, setEditSubtitle] = useState('');
   const [editCategory, setEditCategory] = useState('');
-  const [lastSync, setLastSync] = useState<string>(new Date().toISOString());
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [showDebug, setShowDebug] = useState(false);
   
-  // Refs for real-time updates
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Refs for preventing infinite loops
   const isComponentMountedRef = useRef(true);
+  const fetchingRef = useRef(false);
 
   const buttonStyle = "px-4 py-2 rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
 
@@ -72,12 +74,24 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setTimeout(() => setNotification(null), 5000);
   }, []);
 
-  // Fetch categorized gallery data
+  // Fetch categorized gallery data - stable function with no dependencies
   const fetchCategorizedData = useCallback(async (showLoadingState = true) => {
+    // Prevent multiple simultaneous fetches
+    if (fetchingRef.current) {
+      console.log('Fetch already in progress, skipping...');
+      return;
+    }
+
+    fetchingRef.current = true;
+
     try {
-      if (showLoadingState) setLoading(true);
+      if (showLoadingState && isComponentMountedRef.current) {
+        setLoading(true);
+      }
       
-      const response = await fetch('/api/admin/categorized-gallery', {
+      // Add cache-busting timestamp
+      const timestamp = Date.now();
+      const response = await fetch(`/api/admin/categorized-gallery?t=${timestamp}`, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',
@@ -87,69 +101,101 @@ const CategorizedGalleryAdmin: React.FC = () => {
       
       if (response.ok) {
         const data = await response.json();
+        
+        // Extract metadata if present
+        const { _metadata, ...categoryData } = data;
+        
         if (isComponentMountedRef.current) {
-          setCategoryData(data);
-          setLastSync(new Date().toISOString());
+          setCategoryData(categoryData);
+          
+          if (_metadata) {
+            console.log('Gallery data loaded:', {
+              totalItems: _metadata.totalItems,
+              lastUpdated: _metadata.lastUpdated,
+              categories: Object.keys(categoryData).length
+            });
+          }
         }
       } else {
-        console.error('Failed to fetch categorized gallery data');
-        showNotification('Failed to fetch gallery data', 'error');
+        const errorData = await response.json();
+        console.error('Failed to fetch categorized gallery data:', errorData);
+        if (isComponentMountedRef.current) {
+          showNotification(`Failed to fetch gallery data: ${errorData.message}`, 'error');
+        }
       }
     } catch (error) {
       console.error('Error fetching categorized gallery data:', error);
-      showNotification('Error fetching gallery data', 'error');
+      if (isComponentMountedRef.current) {
+        showNotification('Error fetching gallery data', 'error');
+      }
     } finally {
+      fetchingRef.current = false;
       if (showLoadingState && isComponentMountedRef.current) {
         setLoading(false);
       }
     }
-  }, [showNotification]);
+  }, [showNotification]); // Only depend on showNotification which is stable
 
-  // Real-time sync function
-  const syncData = useCallback(async () => {
+  // Debug function to diagnose issues
+  const runDiagnostics = useCallback(async () => {
     try {
-      const response = await fetch(`/api/admin/categorized-gallery/sync?lastSync=${encodeURIComponent(lastSync)}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
+      const response = await fetch('/api/admin/categorized-gallery/debug', {
+        cache: 'no-store'
       });
       
       if (response.ok) {
-        const { data, changes, lastSync: newLastSync, hasChanges } = await response.json();
+        const diagnostics = await response.json();
+        setDebugInfo(diagnostics);
+        setShowDebug(true);
         
-        if (hasChanges && isComponentMountedRef.current) {
-          setCategoryData(data);
-          setLastSync(newLastSync);
-          
-          if (changes.length > 0) {
-            showNotification(`${changes.length} item(s) updated`, 'info');
-          }
+        if (diagnostics.metadataIssues.length > 0) {
+          showNotification(`Found ${diagnostics.metadataIssues.length} metadata issues`, 'error');
+        } else {
+          showNotification('No issues found', 'success');
         }
       }
     } catch (error) {
-      console.error('Error syncing data:', error);
+      console.error('Error running diagnostics:', error);
+      showNotification('Error running diagnostics', 'error');
     }
-  }, [lastSync, showNotification]);
+  }, [showNotification]);
 
-  // Setup real-time updates
+  // Fix metadata issues
+  const fixMetadataIssues = useCallback(async () => {
+    try {
+      const response = await fetch('/api/admin/categorized-gallery/debug', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'fix-metadata' })
+      });
+      
+      if (response.ok) {
+        const results = await response.json();
+        showNotification(`Fixed ${results.fixed} items`, 'success');
+        
+        // Refresh data after fixing
+        await fetchCategorizedData(false);
+      }
+    } catch (error) {
+      console.error('Error fixing metadata:', error);
+      showNotification('Error fixing metadata', 'error');
+    }
+  }, [showNotification, fetchCategorizedData]);
+
+  // Initial data fetch - only run once on mount
   useEffect(() => {
     isComponentMountedRef.current = true;
     
     // Initial fetch
     fetchCategorizedData();
 
-    // Setup periodic sync (every 5 seconds)
-    syncIntervalRef.current = setInterval(syncData, 5000);
-
     return () => {
       isComponentMountedRef.current = false;
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
+      fetchingRef.current = false;
     };
-  }, [fetchCategorizedData, syncData]);
+  }, []); // Empty dependency array - only run once
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -157,7 +203,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress({});
   };
 
-  // Handle media upload with progress tracking
+  // Handle media upload with improved progress tracking and error handling
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       showNotification('Please select files to upload', 'error');
@@ -200,7 +246,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
         // Update progress for each file
         const updatedProgress = { ...newUploadProgress };
         results.forEach((uploadResult: UploadResult) => {
-          const fileName = uploadResult.fileName || uploadResult.media?.name || 'Unknown';
+          const fileName = uploadResult.originalName || uploadResult.fileName || uploadResult.media?.name || 'Unknown';
           if (updatedProgress[fileName]) {
             updatedProgress[fileName] = {
               progress: 100,
@@ -272,7 +318,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setEditCategory(item.category);
   };
 
-  // Handle save edit
+  // Handle save edit with improved error handling
   const handleSaveEdit = async () => {
     if (!editingItem) return;
 
@@ -305,7 +351,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
     }
   };
 
-  // Handle delete
+  // Handle delete with improved error handling
   const handleDelete = async (item: CategorizedMedia) => {
     if (!confirm(`Are you sure you want to delete "${item.name}"?`)) {
       return;
@@ -361,6 +407,41 @@ const CategorizedGalleryAdmin: React.FC = () => {
           {notification.message}
         </div>
       )}
+
+      {/* Debug Panel */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <h3 className="text-lg font-semibold mb-4 text-yellow-800">System Diagnostics</h3>
+        <div className="flex space-x-4">
+          <button
+            onClick={runDiagnostics}
+            className={`${buttonStyle} bg-yellow-500 hover:bg-yellow-600 text-white`}
+          >
+            Run Diagnostics
+          </button>
+          {debugInfo && debugInfo.metadataIssues.length > 0 && (
+            <button
+              onClick={fixMetadataIssues}
+              className={`${buttonStyle} bg-orange-500 hover:bg-orange-600 text-white`}
+            >
+              Fix Issues
+            </button>
+          )}
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className={`${buttonStyle} bg-gray-500 hover:bg-gray-600 text-white`}
+          >
+            {showDebug ? 'Hide' : 'Show'} Debug Info
+          </button>
+        </div>
+        
+        {showDebug && debugInfo && (
+          <div className="mt-4 p-4 bg-white rounded border">
+            <pre className="text-xs overflow-auto max-h-64">
+              {JSON.stringify(debugInfo, null, 2)}
+            </pre>
+          </div>
+        )}
+      </div>
 
       {/* Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
@@ -492,6 +573,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
                         {item.width && item.height && (
                           <p className="text-xs text-gray-500">{item.width} × {item.height}</p>
                         )}
+                        <p className="text-xs text-gray-500">ID: {item.id}</p>
                         
                         <div className="flex space-x-2">
                           <button
