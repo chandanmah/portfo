@@ -51,7 +51,145 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
   throw lastError;
 }
 
-// Helper function to get all categorized media from blob metadata with improved error handling
+// BULLETPROOF: Determine if file is media based on filename extension
+function isMediaFile(pathname: string, contentType?: string): boolean {
+  // First check content type if available
+  if (contentType) {
+    return contentType.startsWith('image/') || contentType.startsWith('video/');
+  }
+  
+  // Fallback: check file extension
+  const filename = pathname.toLowerCase();
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv'];
+  
+  return [...imageExtensions, ...videoExtensions].some(ext => filename.endsWith(ext));
+}
+
+// BULLETPROOF: Determine media type from filename/content type
+function getMediaType(pathname: string, contentType?: string): 'image' | 'video' {
+  // First check content type if available
+  if (contentType?.startsWith('video/')) {
+    return 'video';
+  }
+  if (contentType?.startsWith('image/')) {
+    return 'image';
+  }
+  
+  // Fallback: check file extension
+  const filename = pathname.toLowerCase();
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv'];
+  
+  if (videoExtensions.some(ext => filename.endsWith(ext))) {
+    return 'video';
+  }
+  
+  return 'image'; // Default to image
+}
+
+// BULLETPROOF: Extract all info from filename - NO METADATA DEPENDENCIES
+function parseMediaFromFilename(pathname: string, url: string, uploadedAt: string, size: number, contentType?: string): CategorizedMedia | null {
+  console.log(`🔍 Parsing filename: ${pathname}`);
+  console.log(`📊 Content type: ${contentType || 'undefined'}`);
+  
+  // Check if this is a media file using bulletproof detection
+  if (!isMediaFile(pathname, contentType)) {
+    console.log(`⏭️ Skipping non-media file based on filename/content type`);
+    return null;
+  }
+  
+  // Extract filename from path
+  const filename = pathname.split('/').pop() || pathname;
+  console.log(`📄 Filename: ${filename}`);
+  
+  // Pattern: categorized-gallery/category-name-timestamp-random.ext
+  // OR: category-name-timestamp-random.ext (for old uploads)
+  
+  let category: string | undefined;
+  let name: string | undefined;
+  const type = getMediaType(pathname, contentType);
+  
+  // Method 1: Extract from categorized-gallery path
+  if (pathname.includes('categorized-gallery/')) {
+    const pathParts = pathname.split('/');
+    if (pathParts.length >= 2) {
+      const categoryFilename = pathParts[1];
+      console.log(`📂 Category filename: ${categoryFilename}`);
+      
+      // Extract category (first part before first dash)
+      const categoryMatch = categoryFilename.match(/^([a-z-]+)-/);
+      if (categoryMatch) {
+        const extractedCategory = categoryMatch[1];
+        if (VALID_CATEGORIES.includes(extractedCategory)) {
+          category = extractedCategory;
+          console.log(`✅ Extracted category: ${category}`);
+          
+          // Extract name (everything between category and timestamp)
+          const nameMatch = categoryFilename.match(/^[a-z-]+-(.+)-\d+-[a-z0-9]+\./);
+          if (nameMatch) {
+            name = nameMatch[1]
+              .replace(/-/g, ' ')
+              .replace(/\b\w/g, l => l.toUpperCase())
+              .trim();
+            console.log(`✅ Extracted name: ${name}`);
+          }
+        }
+      }
+    }
+  }
+  
+  // Method 2: Try to extract from any filename pattern
+  if (!category) {
+    for (const validCategory of VALID_CATEGORIES) {
+      if (filename.toLowerCase().includes(validCategory)) {
+        category = validCategory;
+        console.log(`✅ Found category in filename: ${category}`);
+        break;
+      }
+    }
+  }
+  
+  // Method 3: Default fallback based on content type or path
+  if (!category) {
+    // Default to architecture if we can't determine
+    category = 'architecture';
+    console.log(`⚠️ Using default category: ${category}`);
+  }
+  
+  // Extract name if not found
+  if (!name) {
+    name = filename
+      .replace(/\.[^/.]+$/, '') // Remove extension
+      .replace(/^[a-z-]+-/, '') // Remove category prefix
+      .replace(/-\d+-[a-z0-9]+$/, '') // Remove timestamp suffix
+      .replace(/[-_]/g, ' ') // Replace dashes/underscores with spaces
+      .replace(/\b\w/g, l => l.toUpperCase()) // Capitalize words
+      .trim();
+    
+    if (!name || name === '') {
+      name = 'Untitled';
+    }
+    console.log(`✅ Generated name: ${name}`);
+  }
+  
+  console.log(`✅ Determined type: ${type}`);
+  
+  const mediaItem: CategorizedMedia = {
+    id: filename,
+    url,
+    name,
+    subtitle: '', // Always empty for filename-based parsing
+    category,
+    type,
+    uploadedAt,
+    size
+  };
+  
+  console.log(`✅ Successfully parsed media item:`, mediaItem);
+  return mediaItem;
+}
+
+// BULLETPROOF: Get all categorized media from blob storage using ONLY filenames
 async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -61,77 +199,95 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
 
   try {
     return await retryOperation(async () => {
-      // List all blobs with categorized-gallery prefix
+      console.log('🚀 BULLETPROOF: Reading categorized data using filename parsing...');
+      
+      // List ALL blobs to catch everything
       const { blobs } = await list({
-        prefix: 'categorized-gallery/',
         token,
         limit: 1000
       });
 
+      console.log(`📁 Found ${blobs.length} total blobs`);
+
       const categoryData: CategoryData = {};
       const processedIds = new Set<string>();
+      let validItems = 0;
+      let skippedItems = 0;
 
       for (const blob of blobs) {
         try {
-          // Extract media info from blob metadata
-          const metadata = blob.metadata || {};
-          const category = metadata.category as string;
-          const name = metadata.name as string;
-          const subtitle = metadata.subtitle as string;
-          const type = metadata.type as 'image' | 'video';
-          const width = metadata.width ? parseInt(metadata.width as string) : undefined;
-          const height = metadata.height ? parseInt(metadata.height as string) : undefined;
+          console.log(`\n🔍 Processing blob: ${blob.pathname}`);
+          console.log(`📊 Blob details:`, {
+            pathname: blob.pathname,
+            contentType: blob.contentType || 'undefined',
+            size: blob.size,
+            uploadedAt: blob.uploadedAt
+          });
 
-          // Generate unique ID from pathname
-          const id = blob.pathname.split('/').pop() || blob.pathname;
-          
+          // Skip config files explicitly
+          if (blob.pathname.includes('config.json') || blob.pathname.includes('avatar-')) {
+            console.log(`⏭️ Skipping config/avatar file`);
+            skippedItems++;
+            continue;
+          }
+
+          // Parse media info from filename - NO METADATA DEPENDENCIES
+          const mediaItem = parseMediaFromFilename(
+            blob.pathname,
+            blob.url,
+            blob.uploadedAt,
+            blob.size,
+            blob.contentType
+          );
+
+          if (!mediaItem) {
+            console.warn(`❌ Could not parse media from filename: ${blob.pathname}`);
+            skippedItems++;
+            continue;
+          }
+
           // Skip duplicates
-          if (processedIds.has(id)) {
-            console.warn(`Duplicate blob ID found: ${id}`);
+          if (processedIds.has(mediaItem.id)) {
+            console.warn(`⚠️ Duplicate blob ID found: ${mediaItem.id}`);
+            skippedItems++;
             continue;
           }
-          processedIds.add(id);
+          processedIds.add(mediaItem.id);
 
-          // Validate category
-          if (!category || !VALID_CATEGORIES.includes(category)) {
-            console.warn(`Invalid or missing category for blob ${blob.pathname}: ${category}`);
-            continue;
+          // Initialize category array if needed
+          if (!categoryData[mediaItem.category]) {
+            categoryData[mediaItem.category] = [];
+            console.log(`📂 Created new category: ${mediaItem.category}`);
           }
 
-          if (!categoryData[category]) {
-            categoryData[category] = [];
-          }
+          categoryData[mediaItem.category].push(mediaItem);
+          validItems++;
+          console.log(`✅ Successfully processed: ${mediaItem.name} in ${mediaItem.category}`);
 
-          const mediaItem: CategorizedMedia = {
-            id,
-            url: blob.url,
-            name: name || id.replace(/\.[^/.]+$/, '') || 'Untitled',
-            subtitle: subtitle || '',
-            category,
-            type: type || (blob.contentType?.startsWith('video/') ? 'video' : 'image'),
-            width,
-            height,
-            uploadedAt: blob.uploadedAt,
-            size: blob.size
-          };
-
-          categoryData[category].push(mediaItem);
         } catch (error) {
-          console.warn(`Error processing blob ${blob.pathname}:`, error);
+          console.warn(`❌ Error processing blob ${blob.pathname}:`, error);
+          skippedItems++;
         }
       }
 
-      // Sort items by upload date (newest first) and ensure consistency
+      // Sort items by upload date (newest first)
       Object.keys(categoryData).forEach(category => {
         categoryData[category].sort((a, b) => 
           new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
         );
+        console.log(`📂 Category ${category}: ${categoryData[category].length} items`);
       });
+
+      console.log(`\n📊 BULLETPROOF PROCESSING SUMMARY:`);
+      console.log(`✅ Valid items: ${validItems}`);
+      console.log(`⏭️ Skipped items: ${skippedItems}`);
+      console.log(`📂 Categories found: ${Object.keys(categoryData).length}`);
+      console.log(`📁 Categories:`, Object.keys(categoryData).map(cat => `${cat}: ${categoryData[cat].length} items`));
 
       return categoryData;
     });
   } catch (error: any) {
-    console.error('Error reading categorized data from blobs:', error);
+    console.error('❌ Error reading categorized data from blobs:', error);
     return {};
   }
 }
@@ -139,16 +295,22 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
 // GET handler to retrieve all categorized gallery data
 export async function GET() {
   try {
+    console.log('\n🚀 GET /api/admin/categorized-gallery called');
+    
     const data = await readCategorizedDataFromBlobs();
     
-    // Add cache-busting timestamp
+    // Add metadata
     const timestamp = new Date().toISOString();
+    const totalItems = Object.values(data).reduce((sum, items) => sum + items.length, 0);
+    
+    console.log(`📊 Returning data: ${totalItems} total items across ${Object.keys(data).length} categories`);
     
     return NextResponse.json({
       ...data,
       _metadata: {
         lastUpdated: timestamp,
-        totalItems: Object.values(data).reduce((sum, items) => sum + items.length, 0)
+        totalItems: totalItems,
+        categories: Object.keys(data).length
       }
     }, {
       headers: {
@@ -160,7 +322,7 @@ export async function GET() {
       }
     });
   } catch (error) {
-    console.error('Error in GET /api/admin/categorized-gallery:', error);
+    console.error('❌ Error in GET /api/admin/categorized-gallery:', error);
     return NextResponse.json({ 
       message: 'Error reading categorized gallery data',
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -169,65 +331,96 @@ export async function GET() {
   }
 }
 
-// Helper function to validate file
+// Helper function to validate file - ENHANCED for video support
 function validateFile(file: File): { isValid: boolean; error?: string } {
-  const maxSize = 50 * 1024 * 1024; // 50MB
+  const maxSize = 100 * 1024 * 1024; // Increased to 100MB for videos
   const allowedTypes = [
-    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
-    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'
+    // Images
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml',
+    // Videos - EXPANDED support
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/avi', 
+    'video/x-ms-wmv', 'video/wmv', 'video/x-flv', 'video/3gpp', 'video/ogg'
   ];
 
+  console.log(`🔍 Validating file: ${file.name}`);
+  console.log(`📏 Size: ${file.size} bytes (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+  console.log(`🎭 Type: ${file.type}`);
+
   if (file.size > maxSize) {
-    return { isValid: false, error: 'File size exceeds 50MB limit' };
+    const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+    const maxSizeMB = (maxSize / 1024 / 1024).toFixed(0);
+    return { isValid: false, error: `File size (${sizeMB}MB) exceeds ${maxSizeMB}MB limit` };
   }
 
   if (!allowedTypes.includes(file.type)) {
-    return { isValid: false, error: 'Invalid file type. Only images and videos are allowed.' };
+    return { isValid: false, error: `Invalid file type: ${file.type}. Only images and videos are allowed.` };
   }
 
+  console.log(`✅ File validation passed`);
   return { isValid: true };
 }
 
-// Helper function to generate unique filename with better collision avoidance
-function generateUniqueFileName(category: string, originalName: string, mediaType: string): string {
+// Helper function to generate filename with category prefix - BULLETPROOF NAMING
+function generateCategorizedFileName(category: string, originalName: string, mediaType: string): string {
   const fileExtension = originalName.split('.').pop() || (mediaType === 'video' ? 'mp4' : 'jpg');
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
-  const cleanName = originalName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9-_]/g, '-').substring(0, 30);
+  
+  // Clean the original name for use in filename
+  const cleanName = originalName
+    .replace(/\.[^/.]+$/, '') // Remove extension
+    .replace(/[^a-zA-Z0-9-_\s]/g, '') // Remove special chars except dashes, underscores, spaces
+    .replace(/\s+/g, '-') // Replace spaces with dashes
+    .replace(/-+/g, '-') // Replace multiple dashes with single dash
+    .toLowerCase()
+    .substring(0, 30); // Limit length
+  
+  // BULLETPROOF filename format: categorized-gallery/category-name-timestamp-random.ext
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Helper function to get image dimensions (server-side compatible)
-async function getImageDimensions(file: File): Promise<{ width?: number; height?: number }> {
-  if (!file.type.startsWith('image/')) {
-    return {};
-  }
-
-  try {
-    // For server-side, we'll skip dimension detection for now
-    // In a real implementation, you might use a library like 'sharp' or 'image-size'
-    return {};
-  } catch (error) {
-    console.warn('Could not get image dimensions:', error);
-    return {};
-  }
-}
-
-// POST handler to upload new categorized media items with improved error handling
+// BULLETPROOF POST handler - FIXED for video uploads
 export async function POST(request: NextRequest) {
-  try {
-    const formData = await request.formData();
-    const files = formData.getAll('media') as File[];
-    const category = formData.get('category') as string;
-    const names = formData.getAll('name') as string[];
-    const subtitles = formData.getAll('subtitle') as string[];
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    return NextResponse.json({ message: 'BLOB_READ_WRITE_TOKEN is not configured' }, { status: 500 });
+  }
 
-    if (!files || files.length === 0) {
+  try {
+    console.log('\n🚀 BULLETPROOF UPLOAD PROCESS STARTED');
+
+    // SAFE FormData parsing with error handling
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+      console.log('✅ FormData parsed successfully');
+    } catch (formDataError: any) {
+      console.error('❌ FormData parsing failed:', formDataError);
+      return NextResponse.json({ 
+        message: 'Failed to parse form data',
+        error: formDataError.message,
+        timestamp: new Date().toISOString()
+      }, { status: 400 });
+    }
+    
+    // Handle both single and multiple file uploads
+    const mediaFiles = formData.getAll('media') as File[];
+    const category = formData.get('category') as string;
+    const name = formData.get('name') as string;
+    const subtitle = formData.get('subtitle') as string;
+
+    console.log('📁 Files:', mediaFiles.length);
+    console.log('📂 Category:', category);
+
+    if (!mediaFiles || mediaFiles.length === 0) {
       return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
     }
 
     if (!category || !VALID_CATEGORIES.includes(category)) {
-      return NextResponse.json({ message: 'Invalid or missing category' }, { status: 400 });
+      return NextResponse.json({ 
+        message: `Invalid or missing category. Must be one of: ${VALID_CATEGORIES.join(', ')}`,
+        receivedCategory: category
+      }, { status: 400 });
     }
 
     const uploadResults: Array<{ 
@@ -238,16 +431,21 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with improved error handling
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const name = names[i] || file.name.replace(/\.[^/.]+$/, "");
-      const subtitle = subtitles[i] || '';
+    // Process each file with BULLETPROOF filename-based approach
+    for (let i = 0; i < mediaFiles.length; i++) {
+      const file = mediaFiles[i];
+
+      console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length}`);
+      console.log('📄 Original name:', file.name);
+      console.log('📂 Category:', category);
+      console.log('📏 Size:', file.size, 'bytes');
+      console.log('🎭 Type:', file.type);
 
       try {
-        // Validate file
+        // Validate file - ENHANCED for videos
         const validation = validateFile(file);
         if (!validation.isValid) {
+          console.error('❌ File validation failed:', validation.error);
           uploadResults.push({
             success: false,
             error: validation.error,
@@ -257,62 +455,80 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Determine media type
+        // Determine media type - ENHANCED for videos
         const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
+        console.log(`🎬 Determined media type: ${mediaType}`);
         
-        // Generate unique filename
-        const fileName = generateUniqueFileName(category, file.name, mediaType);
+        // Generate BULLETPROOF filename with category embedded
+        const blobFileName = generateCategorizedFileName(category, file.name, mediaType);
+        console.log('🏷️ Generated bulletproof filename:', blobFileName);
 
-        // Get image dimensions if it's an image
-        const dimensions = await getImageDimensions(file);
-
-        // Prepare comprehensive metadata
-        const metadata = {
-          category,
-          name,
-          subtitle,
-          type: mediaType,
-          originalName: file.name,
-          uploadedBy: 'admin',
-          uploadedAt: new Date().toISOString(),
-          fileSize: file.size.toString(),
-          contentType: file.type,
-          ...(dimensions.width && { width: dimensions.width.toString() }),
-          ...(dimensions.height && { height: dimensions.height.toString() })
-        };
-
-        // Upload media to Vercel Blob with comprehensive metadata
-        const blob = await retryOperation(async () => {
-          return await put(fileName, file, {
-            access: 'public',
-            contentType: file.type,
-            token: process.env.BLOB_READ_WRITE_TOKEN,
-            addRandomSuffix: false,
-            metadata
+        // SAFE blob upload with enhanced error handling
+        console.log('⬆️ Uploading to blob storage...');
+        let blob;
+        try {
+          blob = await retryOperation(async () => {
+            return await put(blobFileName, file, {
+              access: 'public',
+              contentType: file.type,
+              token: token,
+              addRandomSuffix: false,
+              // Minimal metadata - not relied upon for functionality
+              metadata: {
+                category: category,
+                originalName: file.name,
+                uploadedAt: new Date().toISOString(),
+                type: mediaType
+              }
+            });
+          }, 3);
+        } catch (uploadError: any) {
+          console.error('❌ Blob upload failed:', uploadError);
+          uploadResults.push({
+            success: false,
+            error: `Upload failed: ${uploadError.message}`,
+            fileName: file.name,
+            originalName: file.name
           });
-        }, 3);
+          continue;
+        }
 
-        const newMedia: CategorizedMedia = {
-          id: fileName.split('/').pop() || fileName,
-          url: blob.url,
-          name,
-          subtitle,
-          category,
-          type: mediaType as 'image' | 'video',
-          width: dimensions.width,
-          height: dimensions.height,
-          uploadedAt: new Date().toISOString(),
-          size: file.size
-        };
+        console.log('✅ Upload successful!');
+        console.log('🔗 Blob URL:', blob.url);
+
+        // Parse the uploaded file to create media object
+        const mediaItem = parseMediaFromFilename(
+          blobFileName,
+          blob.url,
+          new Date().toISOString(),
+          file.size,
+          file.type
+        );
+
+        if (!mediaItem) {
+          throw new Error('Failed to parse uploaded file');
+        }
+
+        // Override name if provided
+        if (name && name.trim()) {
+          mediaItem.name = name.trim();
+        }
+
+        // Override subtitle if provided
+        if (subtitle && subtitle.trim()) {
+          mediaItem.subtitle = subtitle.trim();
+        }
 
         uploadResults.push({
           success: true,
-          media: newMedia,
+          media: mediaItem,
           originalName: file.name
         });
 
+        console.log('✅ File processing complete for:', file.name);
+
       } catch (error: any) {
-        console.error(`Error uploading file ${file.name}:`, error);
+        console.error(`❌ Error uploading file ${file.name}:`, error);
         uploadResults.push({
           success: false,
           error: error.message || 'Upload failed',
@@ -327,41 +543,62 @@ export async function POST(request: NextRequest) {
 
     let message = '';
     if (successCount > 0 && failureCount === 0) {
-      message = `Successfully uploaded ${successCount} file(s)`;
+      message = `Successfully uploaded ${successCount} file(s) to category "${category}"`;
     } else if (successCount > 0 && failureCount > 0) {
       message = `Uploaded ${successCount} file(s), ${failureCount} failed`;
     } else {
       message = `All ${failureCount} uploads failed`;
     }
 
-    return NextResponse.json({ 
+    console.log('\n📊 BULLETPROOF UPLOAD PROCESS COMPLETE');
+    console.log('✅ Success count:', successCount);
+    console.log('❌ Failure count:', failureCount);
+
+    // SAFE JSON response with proper error handling
+    const responseData = { 
       message,
       results: uploadResults,
       successCount,
       failureCount,
       timestamp: new Date().toISOString()
-    }, {
+    };
+
+    console.log('📤 Sending response:', JSON.stringify(responseData, null, 2));
+
+    return NextResponse.json(responseData, {
       status: successCount > 0 ? 200 : 400,
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
         'Surrogate-Control': 'no-store',
-        'X-Timestamp': new Date().toISOString()
+        'X-Timestamp': new Date().toISOString(),
+        'Content-Type': 'application/json'
       }
     });
 
   } catch (error: any) {
-    console.error('Error in POST /api/admin/categorized-gallery:', error);
-    return NextResponse.json({ 
+    console.error('❌ Error in POST /api/admin/categorized-gallery:', error);
+    
+    // SAFE error response
+    const errorResponse = { 
       message: 'Error uploading media', 
-      error: error.message,
+      error: error.message || 'Unknown error',
       timestamp: new Date().toISOString()
-    }, { status: 500 });
+    };
+
+    console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
+
+    return NextResponse.json(errorResponse, { 
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 }
 
-// DELETE handler to remove a categorized media item with improved error handling
+// DELETE handler to remove a categorized media item
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -372,10 +609,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ message: 'Media ID is required' }, { status: 400 });
     }
 
-    if (!category) {
-      return NextResponse.json({ message: 'Category is required' }, { status: 400 });
-    }
-
     // Find the exact blob to delete
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     if (!token) {
@@ -384,7 +617,6 @@ export async function DELETE(request: NextRequest) {
 
     // List blobs to find the exact match
     const { blobs } = await list({
-      prefix: 'categorized-gallery/',
       token,
       limit: 1000
     });

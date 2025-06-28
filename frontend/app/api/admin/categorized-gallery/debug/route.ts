@@ -114,6 +114,17 @@ export async function GET() {
             });
           }
         }
+      } else {
+        // Check if it's an old-style blob that should be categorized
+        if (blob.contentType?.startsWith('image/') || blob.contentType?.startsWith('video/')) {
+          // This might be an old upload that needs to be migrated
+          diagnostics.metadataIssues.push({
+            pathname: blob.pathname,
+            issue: 'Uncategorized media file - needs migration',
+            metadata: blob.metadata
+          });
+          diagnostics.orphanedBlobs++;
+        }
       }
     }
 
@@ -146,21 +157,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'BLOB_READ_WRITE_TOKEN is not set' }, { status: 500 });
     }
 
-    // List all categorized gallery blobs
+    // List all blobs (not just categorized-gallery ones)
     const { blobs } = await list({
-      prefix: 'categorized-gallery/',
       token,
       limit: 1000
     });
 
     let fixed = 0;
     const errors: string[] = [];
+    const migrated: string[] = [];
 
     for (const blob of blobs) {
       try {
+        // Skip non-media files
+        if (!blob.contentType?.startsWith('image/') && !blob.contentType?.startsWith('video/')) {
+          continue;
+        }
+
         const metadata = blob.metadata || {};
         let needsUpdate = false;
+        let needsMigration = false;
         const updatedMetadata = { ...metadata };
+
+        // Check if this is an old-style upload that needs migration
+        if (!blob.pathname.startsWith('categorized-gallery/')) {
+          needsMigration = true;
+          needsUpdate = true;
+        }
 
         // Extract info from filename if metadata is missing
         const filename = blob.pathname.split('/').pop() || '';
@@ -172,17 +195,27 @@ export async function POST(request: NextRequest) {
           const categoryMatch = filename.match(/^([a-z-]+)-/);
           if (categoryMatch && VALID_CATEGORIES.includes(categoryMatch[1])) {
             updatedMetadata.category = categoryMatch[1];
-            needsUpdate = true;
           } else {
             // Default to architecture if we can't determine
             updatedMetadata.category = 'architecture';
-            needsUpdate = true;
           }
+          needsUpdate = true;
         }
 
         // Fix missing name
         if (!metadata.name) {
-          updatedMetadata.name = nameWithoutExt.replace(/^[a-z-]+-/, '').replace(/-\d+-[a-z0-9]+$/, '') || 'Untitled';
+          // Clean up the filename to create a nice name
+          let cleanName = nameWithoutExt
+            .replace(/^[a-z-]+-/, '') // Remove category prefix
+            .replace(/-\d+-[a-z0-9]+$/, '') // Remove timestamp suffix
+            .replace(/[-_]/g, ' ') // Replace dashes/underscores with spaces
+            .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize words
+          
+          if (!cleanName || cleanName.trim() === '') {
+            cleanName = 'Untitled';
+          }
+          
+          updatedMetadata.name = cleanName;
           needsUpdate = true;
         }
 
@@ -218,14 +251,44 @@ export async function POST(request: NextRequest) {
           }
           const blobContent = await response.blob();
 
-          // Re-upload with fixed metadata
-          await put(blob.pathname, blobContent, {
-            access: 'public',
-            contentType: blob.contentType || 'application/octet-stream',
-            token,
-            addRandomSuffix: false,
-            metadata: updatedMetadata
-          });
+          let newPathname = blob.pathname;
+
+          // If this needs migration, create a new categorized path
+          if (needsMigration) {
+            const category = updatedMetadata.category;
+            const timestamp = Date.now();
+            const randomSuffix = Math.random().toString(36).substring(2, 8);
+            const fileExtension = filename.split('.').pop() || 'jpg';
+            const cleanName = updatedMetadata.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+            
+            newPathname = `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
+            
+            // Upload to new location
+            await put(newPathname, blobContent, {
+              access: 'public',
+              contentType: blob.contentType || 'application/octet-stream',
+              token,
+              addRandomSuffix: false,
+              metadata: updatedMetadata
+            });
+
+            // Delete old blob
+            try {
+              await del(blob.pathname, { token });
+              migrated.push(`${blob.pathname} → ${newPathname}`);
+            } catch (deleteError) {
+              console.warn(`Could not delete old blob ${blob.pathname}:`, deleteError);
+            }
+          } else {
+            // Just update metadata for existing categorized blobs
+            await put(blob.pathname, blobContent, {
+              access: 'public',
+              contentType: blob.contentType || 'application/octet-stream',
+              token,
+              addRandomSuffix: false,
+              metadata: updatedMetadata
+            });
+          }
 
           fixed++;
         }
@@ -239,8 +302,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       fixed,
+      migrated: migrated.length,
+      migratedFiles: migrated,
       errors: errors.length > 0 ? errors : undefined,
-      message: `Fixed metadata for ${fixed} items${errors.length > 0 ? ` (${errors.length} errors)` : ''}`
+      message: `Fixed metadata for ${fixed} items${migrated.length > 0 ? ` (migrated ${migrated.length} files)` : ''}${errors.length > 0 ? ` (${errors.length} errors)` : ''}`
     });
 
   } catch (error: any) {
@@ -269,6 +334,10 @@ function generateRecommendations(diagnostics: DiagnosticResult): string[] {
 
   if (diagnostics.totalBlobs === 0) {
     recommendations.push('No blobs found in storage. Try uploading some media first.');
+  }
+
+  if (diagnostics.totalBlobs > 100) {
+    recommendations.push('Large number of blobs detected. Consider cleaning up unused files to improve performance.');
   }
 
   if (recommendations.length === 0) {

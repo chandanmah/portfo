@@ -61,6 +61,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [clearing, setClearing] = useState(false);
   
   // Refs for preventing infinite loops
   const isComponentMountedRef = useRef(true);
@@ -187,6 +188,54 @@ const CategorizedGalleryAdmin: React.FC = () => {
     }
   }, [showNotification, fetchCategorizedData, runDiagnostics]);
 
+  // Clear all blobs function
+  const clearAllBlobs = useCallback(async () => {
+    const confirmMessage = `⚠️ DANGER: This will permanently delete ALL images and files from your blob storage!
+
+This action cannot be undone. Are you absolutely sure you want to proceed?
+
+Type "DELETE ALL" to confirm:`;
+    
+    const userInput = prompt(confirmMessage);
+    
+    if (userInput !== 'DELETE ALL') {
+      showNotification('Clear operation cancelled', 'info');
+      return;
+    }
+
+    setClearing(true);
+    
+    try {
+      const response = await fetch('/api/admin/categorized-gallery/clear', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'clear-all-blobs' })
+      });
+      
+      if (response.ok) {
+        const results = await response.json();
+        showNotification(`Successfully deleted ${results.deleted} blob(s)`, 'success');
+        
+        // Clear local state
+        setCategoryData({});
+        setDebugInfo(null);
+        
+        // Refresh data
+        await fetchCategorizedData(false);
+      } else {
+        const error = await response.json();
+        showNotification(`Error clearing blobs: ${error.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('Error clearing blobs:', error);
+      showNotification('Error clearing blobs', 'error');
+    } finally {
+      setClearing(false);
+    }
+  }, [showNotification, fetchCategorizedData]);
+
   // Initial data fetch - only run once on mount
   useEffect(() => {
     isComponentMountedRef.current = true;
@@ -206,7 +255,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress({});
   };
 
-  // Handle media upload with improved progress tracking and error handling
+  // SIMPLIFIED upload handler - no complex progress tracking
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       showNotification('Please select files to upload', 'error');
@@ -214,42 +263,33 @@ const CategorizedGalleryAdmin: React.FC = () => {
     }
 
     setUploading(true);
-    const newUploadProgress: UploadProgress = {};
     
-    // Initialize progress for all files
-    Array.from(selectedFiles).forEach(file => {
-      newUploadProgress[file.name] = {
-        progress: 0,
-        status: 'uploading'
-      };
-    });
-    setUploadProgress(newUploadProgress);
-
     try {
-      // Upload files one by one for better progress tracking
-      const results: UploadResult[] = [];
+      console.log('=== SIMPLIFIED UPLOAD PROCESS ===');
+      console.log('Files to upload:', selectedFiles.length);
+      console.log('Selected category:', selectedCategory);
+
+      // Create FormData with ALL files at once
+      const formData = new FormData();
       
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        
-        try {
-          // Update progress to show starting
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: { progress: 10, status: 'uploading' }
-          }));
+      // Add all files
+      Array.from(selectedFiles).forEach(file => {
+        formData.append('media', file);
+      });
+      
+      // Add metadata
+      formData.append('category', selectedCategory);
+      formData.append('name', ''); // Will use filename if empty
+      formData.append('subtitle', '');
 
-          const formData = new FormData();
-          formData.append('media', file);
-          formData.append('category', selectedCategory);
-          formData.append('name', file.name.split('.')[0]);
-          formData.append('subtitle', '');
+      console.log('Sending simplified upload request...');
 
-          const response = await fetch('/api/admin/categorized-gallery', {
-            method: 'POST',
-            body: formData,
-          });
+      const response = await fetch('/api/admin/categorized-gallery', {
+        method: 'POST',
+        body: formData,
+      });
 
+<<<<<<< HEAD
           let result;
           let errorMessage = 'Upload failed';
 
@@ -313,38 +353,37 @@ const CategorizedGalleryAdmin: React.FC = () => {
                 error: networkErrorMessage
               }
             }));
+=======
+      const result = await response.json();
+      console.log('Upload response:', result);
+
+      if (response.ok && result.results) {
+        if (result.successCount > 0) {
+          showNotification(`Successfully uploaded ${result.successCount} file(s)`, 'success');
+          setSelectedFiles(null);
+          
+          // Clear the file input
+          const fileInput = document.getElementById('media-upload') as HTMLInputElement;
+          if (fileInput) fileInput.value = '';
+          
+          // Refresh data immediately
+          console.log('Refreshing gallery data...');
+          await fetchCategorizedData(false);
+>>>>>>> 1f4d94d5ace32031f06c5df1898dd11590db2aae
         }
+
+        if (result.failureCount > 0) {
+          showNotification(`${result.failureCount} upload(s) failed`, 'error');
+        }
+      } else {
+        showNotification(result.message || 'Upload failed', 'error');
       }
 
-      const successCount = results.filter(r => r.success).length;
-      const failureCount = results.filter(r => !r.success).length;
-
-      if (successCount > 0) {
-        showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
-        setSelectedFiles(null);
-        
-        // Clear the file input
-        const fileInput = document.getElementById('media-upload') as HTMLInputElement;
-        if (fileInput) fileInput.value = '';
-        
-        // Refresh data immediately
-        await fetchCategorizedData(false);
-      }
-
-      if (failureCount > 0) {
-        showNotification(`${failureCount} upload(s) failed`, 'error');
-      }
-
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading media:', error);
       showNotification('Error uploading media', 'error');
     } finally {
       setUploading(false);
-      
-      // Clear progress after a delay
-      setTimeout(() => {
-        setUploadProgress({});
-      }, 3000);
     }
   };
 
@@ -449,7 +488,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
       {/* Debug Panel */}
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
         <h3 className="text-lg font-semibold mb-2 text-yellow-800">Diagnostics & Troubleshooting</h3>
-        <div className="flex space-x-3 mb-3">
+        <div className="flex flex-wrap gap-3 mb-3">
           <button
             onClick={runDiagnostics}
             className={`${buttonStyle} bg-yellow-500 hover:bg-yellow-600 text-white text-sm`}
@@ -470,6 +509,20 @@ const CategorizedGalleryAdmin: React.FC = () => {
           >
             {showDebug ? 'Hide' : 'Show'} Debug Info
           </button>
+          <button
+            onClick={clearAllBlobs}
+            disabled={clearing}
+            className={`${buttonStyle} bg-red-600 hover:bg-red-700 text-white text-sm disabled:bg-gray-400 disabled:cursor-not-allowed`}
+          >
+            {clearing ? 'Clearing...' : '🗑️ Clear All Blobs'}
+          </button>
+        </div>
+        
+        <div className="bg-red-50 border border-red-200 rounded p-3 mb-3">
+          <p className="text-red-800 text-sm">
+            <strong>⚠️ Clear All Blobs:</strong> This will permanently delete ALL files from your blob storage. 
+            Use this to start fresh if you have metadata issues or want to clean up old uploads.
+          </p>
         </div>
         
         {showDebug && debugInfo && (
@@ -518,9 +571,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
         )}
       </div>
       
-      {/* Upload Section */}
+      {/* SIMPLIFIED Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
-        <h3 className="text-lg font-semibold mb-4">Upload New Media</h3>
+        <h3 className="text-lg font-semibold mb-4">Upload New Media (Simplified)</h3>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -529,7 +582,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
             >
               {CATEGORIES.map(cat => (
                 <option key={cat.key} value={cat.key}>
@@ -555,49 +608,22 @@ const CategorizedGalleryAdmin: React.FC = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-
-          {/* Upload Progress */}
-          {Object.keys(uploadProgress).length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-gray-700">Upload Progress:</h4>
-              {Object.entries(uploadProgress).map(([fileName, progress]) => (
-                <div key={fileName} className="bg-white p-3 rounded border">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm font-medium truncate">{fileName}</span>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      progress.status === 'success' ? 'bg-green-100 text-green-800' :
-                      progress.status === 'error' ? 'bg-red-100 text-red-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {progress.status === 'success' ? 'Success' :
-                       progress.status === 'error' ? 'Failed' : 'Uploading'}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div 
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        progress.status === 'success' ? 'bg-green-500' :
-                        progress.status === 'error' ? 'bg-red-500' :
-                        'bg-blue-500'
-                      }`}
-                      style={{ width: `${progress.progress}%` }}
-                    ></div>
-                  </div>
-                  {progress.error && (
-                    <p className="text-xs text-red-600 mt-1">{progress.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
           
           <button
             onClick={handleUpload}
             disabled={uploading || !selectedFiles}
             className={`${buttonStyle} bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-400 disabled:cursor-not-allowed`}
           >
-            {uploading ? 'Uploading...' : 'Upload Media'}
+            {uploading ? 'Uploading...' : 'Upload Media (Simplified)'}
           </button>
+          
+          {uploading && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-3">
+              <p className="text-blue-800 text-sm">
+                <strong>Uploading...</strong> Please wait while your files are being uploaded with simplified metadata.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -689,7 +715,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 />
               </div>
               
@@ -701,7 +727,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
                   type="text"
                   value={editSubtitle}
                   onChange={(e) => setEditSubtitle(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 />
               </div>
               
@@ -712,7 +738,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
                 <select
                   value={editCategory}
                   onChange={(e) => setEditCategory(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 >
                   {CATEGORIES.map(cat => (
                     <option key={cat.key} value={cat.key}>
