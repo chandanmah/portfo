@@ -68,6 +68,8 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
         limit: 1000
       });
 
+      console.log(`Found ${blobs.length} categorized gallery blobs`);
+
       const categoryData: CategoryData = {};
       const processedIds = new Set<string>();
 
@@ -94,7 +96,7 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
 
           // Validate category
           if (!category || !VALID_CATEGORIES.includes(category)) {
-            console.warn(`Invalid or missing category for blob ${blob.pathname}: ${category}`);
+            console.warn(`Invalid or missing category for blob ${blob.pathname}: ${category}`, metadata);
             continue;
           }
 
@@ -116,6 +118,7 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
           };
 
           categoryData[category].push(mediaItem);
+          console.log(`Processed media item: ${mediaItem.name} in ${category}`);
         } catch (error) {
           console.warn(`Error processing blob ${blob.pathname}:`, error);
         }
@@ -127,6 +130,8 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
           new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
         );
       });
+
+      console.log('Final category data:', Object.keys(categoryData).map(cat => `${cat}: ${categoryData[cat].length} items`));
 
       return categoryData;
     });
@@ -197,24 +202,50 @@ function generateUniqueFileName(category: string, originalName: string, mediaTyp
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Helper function to get image dimensions (server-side compatible)
-async function getImageDimensions(file: File): Promise<{ width?: number; height?: number }> {
-  if (!file.type.startsWith('image/')) {
-    return {};
-  }
+// Helper function to verify blob metadata after upload
+async function verifyBlobMetadata(pathname: string, expectedMetadata: Record<string, string>): Promise<boolean> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return false;
 
   try {
-    // For server-side, we'll skip dimension detection for now
-    // In a real implementation, you might use a library like 'sharp' or 'image-size'
-    return {};
+    const { blobs } = await list({
+      prefix: pathname,
+      token,
+      limit: 1
+    });
+
+    if (blobs.length === 0) {
+      console.error(`Verification failed: Blob not found at ${pathname}`);
+      return false;
+    }
+
+    const blob = blobs[0];
+    const metadata = blob.metadata || {};
+
+    // Check critical metadata fields
+    const criticalFields = ['category', 'name', 'type'];
+    for (const field of criticalFields) {
+      if (!metadata[field] || metadata[field] !== expectedMetadata[field]) {
+        console.error(`Verification failed: Missing or incorrect ${field}. Expected: ${expectedMetadata[field]}, Got: ${metadata[field]}`);
+        return false;
+      }
+    }
+
+    console.log(`Verification successful for ${pathname}:`, metadata);
+    return true;
   } catch (error) {
-    console.warn('Could not get image dimensions:', error);
-    return {};
+    console.error(`Verification error for ${pathname}:`, error);
+    return false;
   }
 }
 
-// POST handler to upload new categorized media items with FIXED metadata handling
+// POST handler to upload new categorized media items with GUARANTEED metadata
 export async function POST(request: NextRequest) {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    return NextResponse.json({ message: 'BLOB_READ_WRITE_TOKEN is not configured' }, { status: 500 });
+  }
+
   try {
     const formData = await request.formData();
     
@@ -224,12 +255,11 @@ export async function POST(request: NextRequest) {
     const name = formData.get('name') as string;
     const subtitle = formData.get('subtitle') as string;
 
-    console.log('Upload request received:', {
-      fileCount: mediaFiles.length,
-      category,
-      name,
-      subtitle
-    });
+    console.log('=== UPLOAD REQUEST RECEIVED ===');
+    console.log('Files:', mediaFiles.length);
+    console.log('Category:', category);
+    console.log('Name:', name);
+    console.log('Subtitle:', subtitle);
 
     if (!mediaFiles || mediaFiles.length === 0) {
       return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
@@ -250,25 +280,25 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with improved error handling and GUARANTEED metadata
+    // Process each file with GUARANTEED metadata attachment
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
       const fileName = name || file.name.replace(/\.[^/.]+$/, "");
       const fileSubtitle = subtitle || '';
 
-      console.log(`Processing file ${i + 1}/${mediaFiles.length}:`, {
-        originalName: file.name,
-        size: file.size,
-        type: file.type,
-        category,
-        fileName,
-        fileSubtitle
-      });
+      console.log(`\n=== PROCESSING FILE ${i + 1}/${mediaFiles.length} ===`);
+      console.log('Original name:', file.name);
+      console.log('File size:', file.size);
+      console.log('File type:', file.type);
+      console.log('Display name:', fileName);
+      console.log('Subtitle:', fileSubtitle);
+      console.log('Category:', category);
 
       try {
         // Validate file
         const validation = validateFile(file);
         if (!validation.isValid) {
+          console.error('File validation failed:', validation.error);
           uploadResults.push({
             success: false,
             error: validation.error,
@@ -283,75 +313,81 @@ export async function POST(request: NextRequest) {
         
         // Generate unique filename
         const blobFileName = generateUniqueFileName(category, file.name, mediaType);
+        console.log('Generated blob filename:', blobFileName);
 
-        console.log(`Generated blob filename: ${blobFileName}`);
-
-        // Get image dimensions if it's an image
-        const dimensions = await getImageDimensions(file);
-
-        // Prepare COMPREHENSIVE metadata - THIS IS THE KEY FIX
+        // Prepare COMPREHENSIVE metadata - THIS IS THE CRITICAL FIX
         const metadata = {
-          // CRITICAL: These are the required fields that were missing
+          // REQUIRED FIELDS - These MUST be present for the gallery to work
           category: category,
           name: fileName,
           subtitle: fileSubtitle,
           type: mediaType,
           
-          // Additional metadata for completeness
+          // ADDITIONAL METADATA for completeness
           originalName: file.name,
           uploadedBy: 'admin',
           uploadedAt: new Date().toISOString(),
           fileSize: file.size.toString(),
           contentType: file.type,
           
-          // Optional dimension metadata
-          ...(dimensions.width && { width: dimensions.width.toString() }),
-          ...(dimensions.height && { height: dimensions.height.toString() })
+          // VERSION for tracking
+          metadataVersion: '2.0'
         };
 
-        console.log('Metadata to be attached:', metadata);
+        console.log('Metadata to attach:', metadata);
 
-        // Upload media to Vercel Blob with GUARANTEED metadata
+        // STEP 1: Upload to blob storage with metadata
+        console.log('Step 1: Uploading to blob storage...');
         const blob = await retryOperation(async () => {
-          console.log(`Uploading to blob storage with metadata...`);
-          
-          const result = await put(blobFileName, file, {
+          return await put(blobFileName, file, {
             access: 'public',
             contentType: file.type,
-            token: process.env.BLOB_READ_WRITE_TOKEN,
+            token: token,
             addRandomSuffix: false,
-            metadata: metadata // THIS IS THE CRITICAL FIX
+            metadata: metadata // CRITICAL: Attach metadata
           });
-          
-          console.log('Blob upload successful:', {
-            url: result.url,
-            pathname: result.pathname
-          });
-          
-          return result;
         }, 3);
 
-        // Verify the upload has metadata by checking the blob
-        try {
-          const verifyResponse = await list({
-            prefix: blobFileName,
-            token: process.env.BLOB_READ_WRITE_TOKEN,
-            limit: 1
-          });
+        console.log('Blob upload result:', {
+          url: blob.url,
+          pathname: blob.pathname
+        });
+
+        // STEP 2: VERIFY metadata was attached correctly
+        console.log('Step 2: Verifying metadata...');
+        const verificationPassed = await verifyBlobMetadata(blobFileName, metadata);
+        
+        if (!verificationPassed) {
+          // If verification fails, try to re-upload with metadata
+          console.warn('Metadata verification failed, attempting re-upload...');
           
-          if (verifyResponse.blobs.length > 0) {
-            const uploadedBlob = verifyResponse.blobs[0];
-            console.log('Verification - uploaded blob metadata:', uploadedBlob.metadata);
+          try {
+            // Delete the failed upload
+            await del(blob.url, { token });
             
-            if (!uploadedBlob.metadata?.category) {
-              console.error('CRITICAL: Metadata not attached properly!');
-              throw new Error('Metadata verification failed - category missing');
+            // Re-upload with metadata
+            const retryBlob = await put(blobFileName, file, {
+              access: 'public',
+              contentType: file.type,
+              token: token,
+              addRandomSuffix: false,
+              metadata: metadata
+            });
+            
+            // Verify again
+            const retryVerification = await verifyBlobMetadata(blobFileName, metadata);
+            if (!retryVerification) {
+              throw new Error('Metadata verification failed after retry');
             }
+            
+            console.log('Re-upload successful with verified metadata');
+          } catch (retryError) {
+            console.error('Re-upload failed:', retryError);
+            throw new Error(`Metadata attachment failed: ${retryError.message}`);
           }
-        } catch (verifyError) {
-          console.warn('Could not verify metadata:', verifyError);
         }
 
+        // STEP 3: Create media object
         const newMedia: CategorizedMedia = {
           id: blobFileName.split('/').pop() || blobFileName,
           url: blob.url,
@@ -359,13 +395,11 @@ export async function POST(request: NextRequest) {
           subtitle: fileSubtitle,
           category: category,
           type: mediaType as 'image' | 'video',
-          width: dimensions.width,
-          height: dimensions.height,
           uploadedAt: new Date().toISOString(),
           size: file.size
         };
 
-        console.log('Upload successful, created media object:', newMedia);
+        console.log('✅ Upload successful! Created media object:', newMedia);
 
         uploadResults.push({
           success: true,
@@ -374,7 +408,7 @@ export async function POST(request: NextRequest) {
         });
 
       } catch (error: any) {
-        console.error(`Error uploading file ${file.name}:`, error);
+        console.error(`❌ Error uploading file ${file.name}:`, error);
         uploadResults.push({
           success: false,
           error: error.message || 'Upload failed',
@@ -396,11 +430,10 @@ export async function POST(request: NextRequest) {
       message = `All ${failureCount} uploads failed`;
     }
 
-    console.log('Upload process complete:', {
-      successCount,
-      failureCount,
-      message
-    });
+    console.log('\n=== UPLOAD PROCESS COMPLETE ===');
+    console.log('Success count:', successCount);
+    console.log('Failure count:', failureCount);
+    console.log('Message:', message);
 
     return NextResponse.json({ 
       message,
@@ -420,7 +453,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('Error in POST /api/admin/categorized-gallery:', error);
+    console.error('❌ Error in POST /api/admin/categorized-gallery:', error);
     return NextResponse.json({ 
       message: 'Error uploading media', 
       error: error.message,

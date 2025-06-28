@@ -275,68 +275,94 @@ Type "DELETE ALL" to confirm:`;
     setUploadProgress(newUploadProgress);
 
     try {
-      // Upload files one by one for better progress tracking
-      const results: UploadResult[] = [];
+      console.log('=== STARTING UPLOAD PROCESS ===');
+      console.log('Files to upload:', selectedFiles.length);
+      console.log('Selected category:', selectedCategory);
+
+      // Create FormData with ALL files at once
+      const formData = new FormData();
       
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        
-        try {
-          // Update progress to show starting
+      // Add all files
+      Array.from(selectedFiles).forEach(file => {
+        formData.append('media', file);
+      });
+      
+      // Add metadata
+      formData.append('category', selectedCategory);
+      formData.append('name', ''); // Will use filename if empty
+      formData.append('subtitle', '');
+
+      console.log('Sending upload request...');
+
+      // Update progress to show starting
+      Array.from(selectedFiles).forEach(file => {
+        setUploadProgress(prev => ({
+          ...prev,
+          [file.name]: { progress: 10, status: 'uploading' }
+        }));
+      });
+
+      const response = await fetch('/api/admin/categorized-gallery', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      console.log('Upload response:', result);
+
+      if (response.ok && result.results) {
+        // Process results
+        result.results.forEach((uploadResult: UploadResult) => {
+          const fileName = uploadResult.originalName || uploadResult.fileName || 'unknown';
           setUploadProgress(prev => ({
             ...prev,
-            [file.name]: { progress: 10, status: 'uploading' }
+            [fileName]: { 
+              progress: 100, 
+              status: uploadResult.success ? 'success' : 'error',
+              error: uploadResult.error
+            }
           }));
+        });
 
-          const formData = new FormData();
-          formData.append('media', file);
-          formData.append('category', selectedCategory);
-          formData.append('name', file.name.split('.')[0]);
-          formData.append('subtitle', '');
-
-          const response = await fetch('/api/admin/categorized-gallery', {
-            method: 'POST',
-            body: formData,
-          });
-
-          const result = await response.json();
-
-          if (response.ok && result.results && result.results[0]) {
-            const uploadResult = result.results[0];
-            results.push(uploadResult);
-            
-            setUploadProgress(prev => ({
-              ...prev,
-              [file.name]: { 
-                progress: 100, 
-                status: uploadResult.success ? 'success' : 'error',
-                error: uploadResult.error
-              }
-            }));
-          } else {
-            results.push({
-              success: false,
-              error: result.message || 'Upload failed',
-              originalName: file.name
-            });
-            
-            setUploadProgress(prev => ({
-              ...prev,
-              [file.name]: { 
-                progress: 0, 
-                status: 'error',
-                error: result.message || 'Upload failed'
-              }
-            }));
-          }
-        } catch (error: any) {
-          console.error(`Error uploading ${file.name}:`, error);
-          results.push({
-            success: false,
-            error: error.message || 'Network error',
-            originalName: file.name
-          });
+        if (result.successCount > 0) {
+          showNotification(`Successfully uploaded ${result.successCount} file(s)`, 'success');
+          setSelectedFiles(null);
           
+          // Clear the file input
+          const fileInput = document.getElementById('media-upload') as HTMLInputElement;
+          if (fileInput) fileInput.value = '';
+          
+          // Refresh data immediately
+          console.log('Refreshing gallery data...');
+          await fetchCategorizedData(false);
+        }
+
+        if (result.failureCount > 0) {
+          showNotification(`${result.failureCount} upload(s) failed`, 'error');
+        }
+      } else {
+        showNotification(result.message || 'Upload failed', 'error');
+        
+        // Mark all as failed
+        Array.from(selectedFiles).forEach(file => {
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: { 
+              progress: 0, 
+              status: 'error',
+              error: result.message || 'Upload failed'
+            }
+          }));
+        });
+      }
+
+    } catch (error: any) {
+      console.error('Error uploading media:', error);
+      showNotification('Error uploading media', 'error');
+      
+      // Mark all as failed
+      if (selectedFiles) {
+        Array.from(selectedFiles).forEach(file => {
           setUploadProgress(prev => ({
             ...prev,
             [file.name]: { 
@@ -345,38 +371,15 @@ Type "DELETE ALL" to confirm:`;
               error: error.message || 'Network error'
             }
           }));
-        }
+        });
       }
-
-      const successCount = results.filter(r => r.success).length;
-      const failureCount = results.filter(r => !r.success).length;
-
-      if (successCount > 0) {
-        showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
-        setSelectedFiles(null);
-        
-        // Clear the file input
-        const fileInput = document.getElementById('media-upload') as HTMLInputElement;
-        if (fileInput) fileInput.value = '';
-        
-        // Refresh data immediately
-        await fetchCategorizedData(false);
-      }
-
-      if (failureCount > 0) {
-        showNotification(`${failureCount} upload(s) failed`, 'error');
-      }
-
-    } catch (error) {
-      console.error('Error uploading media:', error);
-      showNotification('Error uploading media', 'error');
     } finally {
       setUploading(false);
       
       // Clear progress after a delay
       setTimeout(() => {
         setUploadProgress({});
-      }, 3000);
+      }, 5000);
     }
   };
 
