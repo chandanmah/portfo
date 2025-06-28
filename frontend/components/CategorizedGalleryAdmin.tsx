@@ -408,41 +408,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
         </div>
       )}
 
-      {/* Debug Panel */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-        <h3 className="text-lg font-semibold mb-4 text-yellow-800">System Diagnostics</h3>
-        <div className="flex space-x-4">
-          <button
-            onClick={runDiagnostics}
-            className={`${buttonStyle} bg-yellow-500 hover:bg-yellow-600 text-white`}
-          >
-            Run Diagnostics
-          </button>
-          {debugInfo && debugInfo.metadataIssues.length > 0 && (
-            <button
-              onClick={fixMetadataIssues}
-              className={`${buttonStyle} bg-orange-500 hover:bg-orange-600 text-white`}
-            >
-              Fix Issues
-            </button>
-          )}
-          <button
-            onClick={() => setShowDebug(!showDebug)}
-            className={`${buttonStyle} bg-gray-500 hover:bg-gray-600 text-white`}
-          >
-            {showDebug ? 'Hide' : 'Show'} Debug Info
-          </button>
-        </div>
-        
-        {showDebug && debugInfo && (
-          <div className="mt-4 p-4 bg-white rounded border">
-            <pre className="text-xs overflow-auto max-h-64">
-              {JSON.stringify(debugInfo, null, 2)}
-            </pre>
-          </div>
-        )}
-      </div>
-
+      
       {/* Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
         <h3 className="text-lg font-semibold mb-4">Upload New Media</h3>
