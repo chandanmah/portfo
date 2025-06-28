@@ -51,9 +51,52 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
   throw lastError;
 }
 
+// BULLETPROOF: Determine if file is media based on filename extension
+function isMediaFile(pathname: string, contentType?: string): boolean {
+  // First check content type if available
+  if (contentType) {
+    return contentType.startsWith('image/') || contentType.startsWith('video/');
+  }
+  
+  // Fallback: check file extension
+  const filename = pathname.toLowerCase();
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv'];
+  
+  return [...imageExtensions, ...videoExtensions].some(ext => filename.endsWith(ext));
+}
+
+// BULLETPROOF: Determine media type from filename/content type
+function getMediaType(pathname: string, contentType?: string): 'image' | 'video' {
+  // First check content type if available
+  if (contentType?.startsWith('video/')) {
+    return 'video';
+  }
+  if (contentType?.startsWith('image/')) {
+    return 'image';
+  }
+  
+  // Fallback: check file extension
+  const filename = pathname.toLowerCase();
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv'];
+  
+  if (videoExtensions.some(ext => filename.endsWith(ext))) {
+    return 'video';
+  }
+  
+  return 'image'; // Default to image
+}
+
 // BULLETPROOF: Extract all info from filename - NO METADATA DEPENDENCIES
 function parseMediaFromFilename(pathname: string, url: string, uploadedAt: string, size: number, contentType?: string): CategorizedMedia | null {
   console.log(`🔍 Parsing filename: ${pathname}`);
+  console.log(`📊 Content type: ${contentType || 'undefined'}`);
+  
+  // Check if this is a media file using bulletproof detection
+  if (!isMediaFile(pathname, contentType)) {
+    console.log(`⏭️ Skipping non-media file based on filename/content type`);
+    return null;
+  }
   
   // Extract filename from path
   const filename = pathname.split('/').pop() || pathname;
@@ -64,7 +107,7 @@ function parseMediaFromFilename(pathname: string, url: string, uploadedAt: strin
   
   let category: string | undefined;
   let name: string | undefined;
-  let type: 'image' | 'video' = 'image';
+  const type = getMediaType(pathname, contentType);
   
   // Method 1: Extract from categorized-gallery path
   if (pathname.includes('categorized-gallery/')) {
@@ -129,10 +172,6 @@ function parseMediaFromFilename(pathname: string, url: string, uploadedAt: strin
     console.log(`✅ Generated name: ${name}`);
   }
   
-  // Determine type from content type or filename
-  if (contentType?.startsWith('video/') || filename.match(/\.(mp4|webm|mov|avi)$/i)) {
-    type = 'video';
-  }
   console.log(`✅ Determined type: ${type}`);
   
   const mediaItem: CategorizedMedia = {
@@ -178,27 +217,19 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
       for (const blob of blobs) {
         try {
           console.log(`\n🔍 Processing blob: ${blob.pathname}`);
-          
-          // Skip non-media files
-          if (!blob.contentType?.startsWith('image/') && !blob.contentType?.startsWith('video/')) {
-            console.log(`⏭️ Skipping non-media file: ${blob.contentType}`);
-            skippedItems++;
-            continue;
-          }
+          console.log(`📊 Blob details:`, {
+            pathname: blob.pathname,
+            contentType: blob.contentType || 'undefined',
+            size: blob.size,
+            uploadedAt: blob.uploadedAt
+          });
 
-          // Skip config files
+          // Skip config files explicitly
           if (blob.pathname.includes('config.json') || blob.pathname.includes('avatar-')) {
             console.log(`⏭️ Skipping config/avatar file`);
             skippedItems++;
             continue;
           }
-
-          console.log(`📊 Blob info:`, {
-            pathname: blob.pathname,
-            contentType: blob.contentType,
-            size: blob.size,
-            uploadedAt: blob.uploadedAt
-          });
 
           // Parse media info from filename - NO METADATA DEPENDENCIES
           const mediaItem = parseMediaFromFilename(
