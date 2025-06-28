@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useEffect, ChangeEvent, FormEvent } from 'react';
+import { useState, useEffect, ChangeEvent, FormEvent, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import CategorizedGalleryAdmin from '@/components/CategorizedGalleryAdmin';
 
 interface AvatarData {
   avatarUrl: string;
 }
-
-
 
 export default function AdminArtManagementPage() {
   const router = useRouter();
@@ -17,32 +15,46 @@ export default function AdminArtManagementPage() {
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>('');
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
   const [avatarUploadMessage, setAvatarUploadMessage] = useState<string>('');
-
-
+  const [avatarLoading, setAvatarLoading] = useState<boolean>(false);
 
   const handleLogout = () => {
     document.cookie = 'admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     router.push('/');
   };
 
+  // Fetch avatar data with improved error handling
+  const fetchAvatar = useCallback(async () => {
+    try {
+      setAvatarLoading(true);
+      const timestamp = Date.now();
+      const response = await fetch(`/api/admin/avatar?_t=${timestamp}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data: AvatarData = await response.json();
+      console.log('Admin avatar data:', data);
+      
+      setCurrentAvatarUrl(data.avatarUrl || '');
+    } catch (error: any) {
+      console.error('Error fetching avatar:', error);
+      setAvatarUploadMessage(`Error fetching avatar: ${error.message}`);
+    } finally {
+      setAvatarLoading(false);
+    }
+  }, []);
+
   // Fetch initial data
   useEffect(() => {
     fetchAvatar();
-  }, []);
-
-  const fetchAvatar = async () => {
-    try {
-      const response = await fetch('/api/admin/avatar');
-      if (!response.ok) throw new Error('Failed to fetch avatar');
-      const data: AvatarData = await response.json();
-      setCurrentAvatarUrl(data.avatarUrl || '');
-    } catch (error) {
-      console.error('Error fetching avatar:', error);
-      setAvatarUploadMessage('Error fetching avatar.');
-    }
-  };
-
-
+  }, [fetchAvatar]);
 
   // Avatar Handlers
   const handleAvatarFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -64,28 +76,44 @@ export default function AdminArtManagementPage() {
 
     try {
       setAvatarUploadMessage('Uploading avatar...');
+      setAvatarLoading(true);
+      
       const response = await fetch('/api/admin/avatar', {
         method: 'POST',
         body: formData,
       });
+      
       const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Failed to upload avatar');
+      
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to upload avatar');
+      }
+      
+      console.log('Avatar upload result:', result);
+      
       setAvatarUploadMessage(result.message);
       setCurrentAvatarUrl(result.avatarUrl);
       setSelectedAvatarFile(null);
-      // Clear the file input if possible (might need a ref or reset form)
+      
+      // Clear the file input
       const avatarInput = document.getElementById('avatarInput') as HTMLInputElement;
-      if(avatarInput) avatarInput.value = '';
-    } catch (error) {
+      if (avatarInput) avatarInput.value = '';
+      
+      // Refresh avatar data after a short delay
+      setTimeout(() => {
+        fetchAvatar();
+      }, 1000);
+      
+    } catch (error: any) {
       console.error('Error uploading avatar:', error);
-      setAvatarUploadMessage(error instanceof Error ? error.message : 'Error uploading avatar.');
+      setAvatarUploadMessage(`Error uploading avatar: ${error.message}`);
+    } finally {
+      setAvatarLoading(false);
     }
   };
 
-
-
   const inputStyle = "mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-black";
-  const buttonStyle = "mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500";
+  const buttonStyle = "mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed";
   const sectionStyle = "mb-12 p-6 bg-white shadow-lg rounded-lg";
   const imagePreviewStyle = "mt-4 max-w-xs max-h-64 object-contain border border-gray-200 rounded";
 
@@ -115,20 +143,64 @@ export default function AdminArtManagementPage() {
         <form onSubmit={handleAvatarUpload}>
           <div>
             <label htmlFor="avatarInput" className="block text-sm font-medium text-gray-700">Choose a new profile picture (e.g., a photo of yourself):</label>
-            <input id="avatarInput" type="file" accept="image/*" onChange={handleAvatarFileChange} className={inputStyle} />
+            <input 
+              id="avatarInput" 
+              type="file" 
+              accept="image/*" 
+              onChange={handleAvatarFileChange} 
+              className={inputStyle}
+              disabled={avatarLoading}
+            />
           </div>
-          <button type="submit" className={buttonStyle}>Upload Picture</button>
+          <button 
+            type="submit" 
+            className={buttonStyle}
+            disabled={avatarLoading || !selectedAvatarFile}
+          >
+            {avatarLoading ? 'Uploading...' : 'Upload Picture'}
+          </button>
         </form>
-        {avatarUploadMessage && <p className={`mt-2 text-sm ${avatarUploadMessage.toLowerCase().includes('error') || avatarUploadMessage.toLowerCase().includes('failed') ? 'text-red-600' : 'text-green-600'}`}>{avatarUploadMessage}</p>}
-        {currentAvatarUrl && (
+        
+        {avatarUploadMessage && (
+          <p className={`mt-2 text-sm ${
+            avatarUploadMessage.toLowerCase().includes('error') || 
+            avatarUploadMessage.toLowerCase().includes('failed') 
+              ? 'text-red-600' 
+              : 'text-green-600'
+          }`}>
+            {avatarUploadMessage}
+          </p>
+        )}
+        
+        {avatarLoading ? (
+          <div className="mt-6">
+            <h3 className="text-lg font-medium text-gray-700">Loading...</h3>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mt-2"></div>
+          </div>
+        ) : currentAvatarUrl ? (
           <div className="mt-6">
             <h3 className="text-lg font-medium text-gray-700">Your Current Profile Picture:</h3>
-            <img src={currentAvatarUrl} alt="Current Avatar" className={imagePreviewStyle} />
+            <img 
+              src={currentAvatarUrl} 
+              alt="Current Avatar" 
+              className={imagePreviewStyle}
+              onError={(e) => {
+                console.error('Avatar image failed to load in admin:', currentAvatarUrl);
+                setAvatarUploadMessage('Error: Avatar image failed to load');
+              }}
+              onLoad={() => {
+                console.log('Avatar image loaded successfully in admin');
+              }}
+            />
+            <p className="text-xs text-gray-500 mt-2">URL: {currentAvatarUrl}</p>
+          </div>
+        ) : (
+          <div className="mt-6">
+            <h3 className="text-lg font-medium text-gray-700">No Profile Picture Set</h3>
+            <p className="text-sm text-gray-500">Upload an image to set your profile picture.</p>
           </div>
         )}
       </section>
-
-
 
       {/* Categorized Gallery Management */}
       <section className="bg-white rounded-lg shadow-md p-6">

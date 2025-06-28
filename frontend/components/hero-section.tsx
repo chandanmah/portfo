@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { Mail, User, Palette } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 interface AvatarData {
   avatarUrl: string;
@@ -11,35 +11,51 @@ interface AvatarData {
 
 export default function HeroSection() {
   const [avatarUrl, setAvatarUrl] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string>("");
+
+  const fetchAvatar = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      
+      const timestamp = Date.now();
+      const response = await fetch(`/api/admin/avatar?_t=${timestamp}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data: AvatarData = await response.json();
+      console.log('Avatar data received:', data);
+      
+      if (data.avatarUrl) {
+        setAvatarUrl(data.avatarUrl);
+      } else {
+        console.warn('No avatar URL in response');
+      }
+    } catch (error: any) {
+      console.error('Error fetching avatar:', error);
+      setError(error.message || 'Failed to load avatar');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchAvatar = async () => {
-      try {
-        const timestamp = Date.now();
-        const response = await fetch(`/api/admin/avatar?_t=${timestamp}`, {
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-        });
-        if (!response.ok) {
-          console.error('Failed to fetch avatar');
-          // Keep placeholder if fetch fails
-          return;
-        }
-        const data: AvatarData = await response.json();
-        if (data.avatarUrl) {
-          setAvatarUrl(data.avatarUrl);
-        }
-      } catch (error) {
-        console.error('Error fetching avatar:', error);
-        // Keep placeholder on error
-      }
-    };
-
     fetchAvatar();
-  }, []);
+    
+    // Set up periodic refresh to catch updates
+    const interval = setInterval(fetchAvatar, 30000); // Check every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [fetchAvatar]);
 
   const smoothScrollTo = (id: string) => (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -47,6 +63,7 @@ export default function HeroSection() {
       behavior: 'smooth'
     });
   };
+
   return (
     <section className="flex items-center justify-center min-h-[90vh] pt-0 pb-20 md:py-20 px-4 bg-transparent">
       {/* Unified Frosted Glass Card */}
@@ -57,7 +74,16 @@ export default function HeroSection() {
             <div className="flex-shrink-0">
               <div className="relative">
                 <div className="w-80 h-96 md:w-96 md:h-[28rem] rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.2)] border border-[#3B3024]/40">
-                  {avatarUrl ? (
+                  {loading ? (
+                    <div className="w-full h-full bg-gradient-to-br from-white/20 to-white/10 flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#3B3024]"></div>
+                    </div>
+                  ) : error ? (
+                    <div className="w-full h-full bg-gradient-to-br from-red/20 to-red/10 flex items-center justify-center flex-col">
+                      <User className="w-24 h-24 text-red-600 mb-2" />
+                      <p className="text-red-600 text-sm text-center px-4">{error}</p>
+                    </div>
+                  ) : avatarUrl ? (
                     <Image
                       src={avatarUrl}
                       alt="Mr. Mahanta"
@@ -65,6 +91,15 @@ export default function HeroSection() {
                       width={384}
                       height={448}
                       className="w-full h-full object-cover"
+                      unoptimized
+                      onError={(e) => {
+                        console.error('Image failed to load:', avatarUrl);
+                        setError('Image failed to load');
+                        setAvatarUrl('');
+                      }}
+                      onLoad={() => {
+                        console.log('Avatar image loaded successfully');
+                      }}
                     />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-white/20 to-white/10 flex items-center justify-center">
