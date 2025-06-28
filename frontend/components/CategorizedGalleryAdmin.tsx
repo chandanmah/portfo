@@ -250,7 +250,23 @@ const CategorizedGalleryAdmin: React.FC = () => {
             body: formData,
           });
 
-          const result = await response.json();
+          let result;
+          let errorMessage = 'Upload failed';
+
+          if (response.ok) {
+            result = await response.json();
+          } else {
+            try {
+              // Attempt to parse as JSON first, in case it's a structured error
+              result = await response.json();
+              errorMessage = result.message || JSON.stringify(result);
+            } catch (jsonError) {
+              // If not JSON, read as plain text
+              errorMessage = await response.text();
+            }
+            // For non-ok responses, ensure result is an object to avoid errors later
+            result = { success: false, message: errorMessage };
+          }
 
           if (response.ok && result.results && result.results[0]) {
             const uploadResult = result.results[0];
@@ -267,7 +283,25 @@ const CategorizedGalleryAdmin: React.FC = () => {
           } else {
             results.push({
               success: false,
-              error: result.message || 'Upload failed',
+              error: errorMessage,
+              originalName: file.name
+            });
+            
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: {
+                progress: 0,
+                status: 'error',
+                error: errorMessage
+              }
+            }));
+          }
+        } catch (error: any) {
+            console.error(`Error uploading ${file.name}:`, error);
+            const networkErrorMessage = error.message || 'Network error';
+            results.push({
+              success: false,
+              error: networkErrorMessage,
               originalName: file.name
             });
             
@@ -276,26 +310,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
               [file.name]: { 
                 progress: 0, 
                 status: 'error',
-                error: result.message || 'Upload failed'
+                error: networkErrorMessage
               }
             }));
-          }
-        } catch (error: any) {
-          console.error(`Error uploading ${file.name}:`, error);
-          results.push({
-            success: false,
-            error: error.message || 'Network error',
-            originalName: file.name
-          });
-          
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: { 
-              progress: 0, 
-              status: 'error',
-              error: error.message || 'Network error'
-            }
-          }));
         }
       }
 
