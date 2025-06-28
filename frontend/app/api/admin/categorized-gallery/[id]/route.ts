@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { put, del, head } from '@vercel/blob';
+import { put, del, list } from '@vercel/blob';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,13 +12,9 @@ interface CategorizedMedia {
   type: 'image' | 'video';
   width?: number;
   height?: number;
+  uploadedAt: string;
+  size?: number;
 }
-
-interface CategoryData {
-  [key: string]: CategorizedMedia[];
-}
-
-const CATEGORIZED_CONFIG_KEY = 'categorized-gallery-config.json';
 
 const VALID_CATEGORIES = [
   'architecture',
@@ -50,53 +46,31 @@ async function retryOperation<T>(
   throw new Error('Operation failed after maximum retries');
 }
 
-// Helper function to get categorized gallery data from Vercel Blob
-async function readCategorizedData(): Promise<CategoryData> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    console.warn('BLOB_READ_WRITE_TOKEN is not set. Categorized gallery functionality might be limited.');
-    return {};
-  }
-
-  return retryOperation(async () => {
-    try {
-      const headResult = await head(CATEGORIZED_CONFIG_KEY, { token });
-      const response = await fetch(headResult.url, { cache: 'no-store' });
-
-      if (response.ok) {
-        const data = await response.json();
-        return data || {};
-      }
-      if (response.status === 404) {
-        console.log(`Config file not found, returning empty object.`);
-        return {};
-      }
-      throw new Error(`Failed to fetch config: ${response.statusText}`);
-    } catch (error: any) {
-      if (error.message.includes('does not exist')) {
-        console.log(`Config file not found, returning empty object.`);
-        return {};
-      }
-      throw error;
-    }
-  });
-}
-
-// Helper function to save categorized gallery data to Vercel Blob
-async function writeCategorizedData(data: CategoryData): Promise<void> {
+// Helper function to find blob by ID
+async function findBlobById(id: string): Promise<{ url: string; pathname: string; metadata?: Record<string, string> } | null> {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
     throw new Error('BLOB_READ_WRITE_TOKEN is not set.');
   }
 
-  await retryOperation(async () => {
-    await put(CATEGORIZED_CONFIG_KEY, JSON.stringify(data), {
-      access: 'public',
-      contentType: 'application/json',
-      token: token,
-      addRandomSuffix: false,
+  try {
+    const { blobs } = await list({
+      prefix: 'categorized-gallery/',
+      token,
+      limit: 1000
     });
-  });
+
+    // Find blob by ID (which should be the filename part)
+    const blob = blobs.find(b => {
+      const fileName = b.pathname.split('/').pop();
+      return fileName === id || b.pathname.endsWith(`/${id}`);
+    });
+
+    return blob || null;
+  } catch (error) {
+    console.error('Error finding blob:', error);
+    return null;
+  }
 }
 
 // PUT handler to update a categorized media item
@@ -114,63 +88,158 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ message: 'Invalid category' }, { status: 400 });
     }
 
-    const data = await readCategorizedData();
-    let mediaItem: CategorizedMedia | null = null;
-    let oldCategory: string | null = null;
-
-    // Find the media item across all categories
-    for (const [cat, items] of Object.entries(data)) {
-      const foundItem = items.find(item => item.id === id);
-      if (foundItem) {
-        mediaItem = foundItem;
-        oldCategory = cat;
-        break;
-      }
-    }
-
-    if (!mediaItem || !oldCategory) {
+    // Find the existing blob
+    const existingBlob = await findBlobById(id);
+    if (!existingBlob) {
       return NextResponse.json({ message: 'Media not found' }, { status: 404 });
     }
 
-    // Update the media item
-    mediaItem.name = name;
-    if (subtitle !== undefined) {
-      mediaItem.subtitle = subtitle;
-    }
+    const currentMetadata = existingBlob.metadata || {};
+    const oldCategory = currentMetadata.category;
 
-    // If category is being changed, move the item
+    // If category is changing, we need to create a new blob with new path and delete the old one
     if (category && category !== oldCategory) {
-      // Remove from old category
-      const oldCategoryIndex = data[oldCategory].findIndex(item => item.id === id);
-      if (oldCategoryIndex !== -1) {
-        data[oldCategory].splice(oldCategoryIndex, 1);
-      }
+      try {
+        // Download the existing blob content
+        const response = await fetch(existingBlob.url);
+        if (!response.ok) {
+          throw new Error('Failed to fetch existing blob content');
+        }
+        const blob = await response.blob();
 
-      // Update category in media item
-      mediaItem.category = category;
+        // Create new filename with new category
+        const originalFileName = currentMetadata.originalName || id;
+        const fileExtension = originalFileName.split('.').pop() || 'jpg';
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const cleanName = name.replace(/[^a-zA-Z0-9-_]/g, '-');
+        const newFileName = `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 
-      // Add to new category
-      if (!data[category]) {
-        data[category] = [];
+        // Prepare updated metadata
+        const updatedMetadata = {
+          ...currentMetadata,
+          name,
+          subtitle: subtitle || '',
+          category
+        };
+
+        // Upload new blob with updated metadata
+        const newBlob = await retryOperation(async () => {
+          return await put(newFileName, blob, {
+            access: 'public',
+            contentType: blob.type,
+            token: process.env.BLOB_READ_WRITE_TOKEN,
+            addRandomSuffix: false,
+            metadata: updatedMetadata
+          });
+        });
+
+        // Delete the old blob
+        try {
+          await retryOperation(async () => {
+            return await del(existingBlob.pathname, { token: process.env.BLOB_READ_WRITE_TOKEN });
+          });
+        } catch (deleteError) {
+          console.warn('Failed to delete old blob:', deleteError);
+          // Continue even if deletion fails
+        }
+
+        const updatedMedia: CategorizedMedia = {
+          id: newFileName.split('/').pop() || newFileName,
+          url: newBlob.url,
+          name,
+          subtitle: subtitle || '',
+          category,
+          type: (currentMetadata.type as 'image' | 'video') || 'image',
+          width: currentMetadata.width ? parseInt(currentMetadata.width) : undefined,
+          height: currentMetadata.height ? parseInt(currentMetadata.height) : undefined,
+          uploadedAt: currentMetadata.uploadedAt || new Date().toISOString(),
+          size: blob.size
+        };
+
+        return NextResponse.json({ 
+          message: 'Media updated successfully', 
+          media: updatedMedia 
+        }, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Surrogate-Control': 'no-store'
+          }
+        });
+
+      } catch (error: any) {
+        console.error('Error updating media with category change:', error);
+        return NextResponse.json({ 
+          message: 'Error updating media', 
+          error: error.message 
+        }, { status: 500 });
       }
-      data[category].push(mediaItem);
+    } else {
+      // Just update metadata without changing category
+      try {
+        // Download the existing blob content
+        const response = await fetch(existingBlob.url);
+        if (!response.ok) {
+          throw new Error('Failed to fetch existing blob content');
+        }
+        const blob = await response.blob();
+
+        // Prepare updated metadata
+        const updatedMetadata = {
+          ...currentMetadata,
+          name,
+          subtitle: subtitle || ''
+        };
+
+        // Re-upload with updated metadata (same path)
+        const updatedBlob = await retryOperation(async () => {
+          return await put(existingBlob.pathname, blob, {
+            access: 'public',
+            contentType: blob.type,
+            token: process.env.BLOB_READ_WRITE_TOKEN,
+            addRandomSuffix: false,
+            metadata: updatedMetadata
+          });
+        });
+
+        const updatedMedia: CategorizedMedia = {
+          id,
+          url: updatedBlob.url,
+          name,
+          subtitle: subtitle || '',
+          category: currentMetadata.category || 'architecture',
+          type: (currentMetadata.type as 'image' | 'video') || 'image',
+          width: currentMetadata.width ? parseInt(currentMetadata.width) : undefined,
+          height: currentMetadata.height ? parseInt(currentMetadata.height) : undefined,
+          uploadedAt: currentMetadata.uploadedAt || new Date().toISOString(),
+          size: blob.size
+        };
+
+        return NextResponse.json({ 
+          message: 'Media updated successfully', 
+          media: updatedMedia 
+        }, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Surrogate-Control': 'no-store'
+          }
+        });
+
+      } catch (error: any) {
+        console.error('Error updating media metadata:', error);
+        return NextResponse.json({ 
+          message: 'Error updating media', 
+          error: error.message 
+        }, { status: 500 });
+      }
     }
 
-    await writeCategorizedData(data);
-
-    return NextResponse.json({ 
-      message: 'Media updated successfully', 
-      media: mediaItem 
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Surrogate-Control': 'no-store'
-      }
-    });
   } catch (error: any) {
-    console.error('Error updating categorized media:', error);
+    console.error('Error in PUT /api/admin/categorized-gallery/[id]:', error);
     return NextResponse.json({ 
       message: 'Error updating media', 
       error: error.message 

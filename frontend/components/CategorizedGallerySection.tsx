@@ -13,6 +13,8 @@ interface GalleryMedia {
   type: 'image' | 'video';
   width?: number;
   height?: number;
+  uploadedAt: string;
+  size?: number;
 }
 
 interface CategoryData {
@@ -69,6 +71,11 @@ const CategorizedGallerySection: React.FC = () => {
   const [playingVideos, setPlayingVideos] = useState<Record<string, boolean>>({});
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
+  const [lastSync, setLastSync] = useState<string>('');
+  
+  // Refs for real-time updates
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isComponentMountedRef = useRef(true);
 
   useEffect(() => {
     if (isModalOpen) {
@@ -110,28 +117,100 @@ const CategorizedGallerySection: React.FC = () => {
     }
   }, [isModalOpen, selectedMedia]);
 
-  useEffect(() => {
-    const fetchCategoryData = async () => {
+  // Fetch categorized gallery data - memoized to prevent infinite loops
+  const fetchCategoryData = useCallback(async (showLoadingState = true) => {
+    if (showLoadingState) {
       setIsLoading(true);
       setError(null);
-      try {
-        const response = await fetch('/api/admin/categorized-gallery');
-        if (!response.ok) {
-          throw new Error('Failed to fetch categorized gallery data');
+    }
+    
+    try {
+      const response = await fetch('/api/admin/categorized-gallery', {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
         }
-        const data: CategoryData = await response.json();
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch categorized gallery data');
+      }
+      
+      const data: CategoryData = await response.json();
+      
+      if (isComponentMountedRef.current) {
         setCategoryData(data);
-      } catch (err) {
-        console.error('Error fetching categorized gallery data:', err);
+        setLastSync(new Date().toISOString());
+      }
+    } catch (err) {
+      console.error('Error fetching categorized gallery data:', err);
+      if (isComponentMountedRef.current) {
         setError(err instanceof Error ? err.message : 'An unknown error occurred');
         setCategoryData({});
-      } finally {
+      }
+    } finally {
+      if (showLoadingState && isComponentMountedRef.current) {
         setIsLoading(false);
       }
-    };
+    }
+  }, []); // Empty dependency array since this function doesn't depend on any state
 
+  // Real-time sync function for public gallery - memoized to prevent infinite loops
+  const syncData = useCallback(async () => {
+    if (!lastSync) return; // Don't sync if we haven't done initial fetch
+    
+    try {
+      const response = await fetch(`/api/admin/categorized-gallery/sync?lastSync=${encodeURIComponent(lastSync)}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      if (response.ok) {
+        const { data, hasChanges, lastSync: newLastSync } = await response.json();
+        
+        if (hasChanges && isComponentMountedRef.current) {
+          setCategoryData(data);
+          setLastSync(newLastSync);
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing gallery data:', error);
+    }
+  }, [lastSync]); // Only depend on lastSync
+
+  // Setup real-time updates
+  useEffect(() => {
+    isComponentMountedRef.current = true;
+    
+    // Initial fetch
     fetchCategoryData();
-  }, []);
+
+    return () => {
+      isComponentMountedRef.current = false;
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+      }
+    };
+  }, []); // Empty dependency array for initial setup
+
+  // Separate effect for sync interval to avoid recreating it
+  useEffect(() => {
+    if (lastSync && !syncIntervalRef.current) {
+      // Setup periodic sync (every 10 seconds for public gallery)
+      syncIntervalRef.current = setInterval(syncData, 10000);
+    }
+
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [lastSync, syncData]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -206,10 +285,15 @@ const CategorizedGallerySection: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isModalOpen, closeMediaModal, navigateMedia]); // Added navigateMedia to dependency array
+  }, [isModalOpen, closeMediaModal, navigateMedia]);
 
   if (isLoading) {
-    return <div className="text-center py-12 text-gray-600">Loading gallery...</div>;
+    return (
+      <div className="text-center py-12 text-gray-600">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p>Loading gallery...</p>
+      </div>
+    );
   }
 
   if (error) {
@@ -374,14 +458,14 @@ const CategorizedGallerySection: React.FC = () => {
       {/* Modal */}
       {isModalOpen && selectedMedia && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xl transition-opacity duration-300 ease-in-out w-full h-full min-h-screen min-w-screen p-4" // Ensure full viewport coverage and retain padding for content
-          onClick={closeMediaModal} // Close modal when clicking on the backdrop
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xl transition-opacity duration-300 ease-in-out w-full h-full min-h-screen min-w-screen p-4"
+          onClick={closeMediaModal}
         >
           <div 
             ref={modalContentRef}
-            tabIndex={-1} // Make div focusable
-            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none" // Changed bg-white/10 to bg-white/5, increased backdrop-blur-2xl, changed border-white/20 to border-white/10, added overflow-auto for scrolling if content exceeds max-h, added focus:outline-none
-            onClick={(e) => e.stopPropagation()} // Prevent closing modal when clicking inside the card content
+            tabIndex={-1}
+            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none"
+            onClick={(e) => e.stopPropagation()}
           >
             <button 
               onClick={closeMediaModal} 
@@ -411,8 +495,7 @@ const CategorizedGallerySection: React.FC = () => {
               </>
             )}
 
-            
-            {/* Image container - ensure it takes available space and centers the image, allowing natural aspect ratio with object-contain */}
+            {/* Image container */}
             <div className="w-full h-full flex-grow flex items-center justify-center overflow-hidden py-2 sm:py-2">
               {selectedMedia.type === 'video' ? (
                 <video 
