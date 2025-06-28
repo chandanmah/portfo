@@ -4,12 +4,15 @@ export const config = {
   api: {
     bodyParser: false,
   },
-  // Specifies the maximum allowed size for the request body. Setting to 50mb for video uploads.
-  // This is a common workaround for large file uploads in Next.js API routes.
+  // Increased size limit for video uploads
   bodyParser: {
-    sizeLimit: '50mb',
+    sizeLimit: '100mb',
   },
 };
+
+// Add this at the top to handle large payloads
+export const maxDuration = 300; // 5 minutes for video uploads
+
 import { put, del, list } from '@vercel/blob';
 
 export const dynamic = 'force-dynamic';
@@ -42,8 +45,8 @@ const VALID_CATEGORIES = [
   'furniture'
 ];
 
-// Helper function to retry operations with exponential backoff
-async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+// Enhanced retry operation with longer delays for video uploads
+async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3, isVideo: boolean = false): Promise<T> {
   let lastError: any;
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -51,10 +54,14 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
       return await operation();
     } catch (error: any) {
       lastError = error;
+      console.log(`❌ Retry attempt ${attempt + 1}/${maxRetries + 1} failed:`, error.message);
+      
       if (attempt === maxRetries) break;
       
-      // Exponential backoff: 1s, 2s, 4s
-      const delay = Math.pow(2, attempt) * 1000;
+      // Longer delays for video uploads: 2s, 4s, 8s
+      const baseDelay = isVideo ? 2000 : 1000;
+      const delay = Math.pow(2, attempt) * baseDelay;
+      console.log(`⏱️ Waiting ${delay}ms before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -62,40 +69,52 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
   throw lastError;
 }
 
-// BULLETPROOF: Determine if file is media based on filename extension
+// Enhanced media file detection with better video support
 function isMediaFile(pathname: string, contentType?: string): boolean {
+  console.log(`🔍 Checking if media file - pathname: ${pathname}, contentType: ${contentType}`);
+  
   // First check content type if available
   if (contentType) {
-    return contentType.startsWith('image/') || contentType.startsWith('video/');
+    const isMedia = contentType.startsWith('image/') || contentType.startsWith('video/');
+    console.log(`📋 Content type check result: ${isMedia}`);
+    return isMedia;
   }
   
   // Fallback: check file extension
   const filename = pathname.toLowerCase();
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
-  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv'];
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'];
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv', '.m4v', '.3gp', '.flv'];
   
-  return [...imageExtensions, ...videoExtensions].some(ext => filename.endsWith(ext));
+  const isMedia = [...imageExtensions, ...videoExtensions].some(ext => filename.endsWith(ext));
+  console.log(`📁 Extension check result: ${isMedia}`);
+  return isMedia;
 }
 
-// BULLETPROOF: Determine media type from filename/content type
+// Enhanced media type detection
 function getMediaType(pathname: string, contentType?: string): 'image' | 'video' {
+  console.log(`🎭 Determining media type - pathname: ${pathname}, contentType: ${contentType}`);
+  
   // First check content type if available
   if (contentType?.startsWith('video/')) {
+    console.log(`🎬 Content type indicates video`);
     return 'video';
   }
   if (contentType?.startsWith('image/')) {
+    console.log(`🖼️ Content type indicates image`);
     return 'image';
   }
   
   // Fallback: check file extension
   const filename = pathname.toLowerCase();
-  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv'];
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv', '.m4v', '.3gp', '.flv'];
   
   if (videoExtensions.some(ext => filename.endsWith(ext))) {
+    console.log(`🎬 Extension indicates video`);
     return 'video';
   }
   
-  return 'image'; // Default to image
+  console.log(`🖼️ Defaulting to image`);
+  return 'image';
 }
 
 // BULLETPROOF: Extract all info from filename - NO METADATA DEPENDENCIES
@@ -112,9 +131,6 @@ function parseMediaFromFilename(pathname: string, url: string, uploadedAt: strin
   // Extract filename from path
   const filename = pathname.split('/').pop() || pathname;
   console.log(`📄 Filename: ${filename}`);
-  
-  // Pattern: categorized-gallery/category-name-timestamp-random.ext
-  // OR: category-name-timestamp-random.ext (for old uploads)
   
   let category: string | undefined;
   let name: string | undefined;
@@ -160,9 +176,8 @@ function parseMediaFromFilename(pathname: string, url: string, uploadedAt: strin
     }
   }
   
-  // Method 3: Default fallback based on content type or path
+  // Method 3: Default fallback
   if (!category) {
-    // Default to architecture if we can't determine
     category = 'architecture';
     console.log(`⚠️ Using default category: ${category}`);
   }
@@ -189,7 +204,7 @@ function parseMediaFromFilename(pathname: string, url: string, uploadedAt: strin
     id: filename,
     url,
     name,
-    subtitle: '', // Always empty for filename-based parsing
+    subtitle: '',
     category,
     type,
     uploadedAt,
@@ -212,7 +227,6 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
     return await retryOperation(async () => {
       console.log('🚀 BULLETPROOF: Reading categorized data using filename parsing...');
       
-      // List ALL blobs to catch everything
       const { blobs } = await list({
         token,
         limit: 1000
@@ -228,12 +242,6 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
       for (const blob of blobs) {
         try {
           console.log(`\n🔍 Processing blob: ${blob.pathname}`);
-          console.log(`📊 Blob details:`, {
-            pathname: blob.pathname,
-            contentType: blob.contentType || 'undefined',
-            size: blob.size,
-            uploadedAt: blob.uploadedAt
-          });
 
           // Skip config files explicitly
           if (blob.pathname.includes('config.json') || blob.pathname.includes('avatar-')) {
@@ -242,7 +250,6 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
             continue;
           }
 
-          // Parse media info from filename - NO METADATA DEPENDENCIES
           const mediaItem = parseMediaFromFilename(
             blob.pathname,
             blob.url,
@@ -257,7 +264,6 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
             continue;
           }
 
-          // Skip duplicates
           if (processedIds.has(mediaItem.id)) {
             console.warn(`⚠️ Duplicate blob ID found: ${mediaItem.id}`);
             skippedItems++;
@@ -265,7 +271,6 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
           }
           processedIds.add(mediaItem.id);
 
-          // Initialize category array if needed
           if (!categoryData[mediaItem.category]) {
             categoryData[mediaItem.category] = [];
             console.log(`📂 Created new category: ${mediaItem.category}`);
@@ -293,7 +298,6 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
       console.log(`✅ Valid items: ${validItems}`);
       console.log(`⏭️ Skipped items: ${skippedItems}`);
       console.log(`📂 Categories found: ${Object.keys(categoryData).length}`);
-      console.log(`📁 Categories:`, Object.keys(categoryData).map(cat => `${cat}: ${categoryData[cat].length} items`));
 
       return categoryData;
     });
@@ -303,14 +307,13 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
   }
 }
 
-// GET handler to retrieve all categorized gallery data
+// GET handler
 export async function GET() {
   try {
     console.log('\n🚀 GET /api/admin/categorized-gallery called');
     
     const data = await readCategorizedDataFromBlobs();
     
-    // Add metadata
     const timestamp = new Date().toISOString();
     const totalItems = Object.values(data).reduce((sum, items) => sum + items.length, 0);
     
@@ -325,11 +328,10 @@ export async function GET() {
       }
     }, {
       headers: {
-
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-         'Pragma': 'no-cache',
-         'Expires': '0',
-         'Surrogate-Control': 'no-store',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store',
         'X-Timestamp': timestamp
       }
     });
@@ -343,20 +345,25 @@ export async function GET() {
   }
 }
 
-// Helper function to validate file - ENHANCED for video support
+// Enhanced file validation with specific video support
 function validateFile(file: File): { isValid: boolean; error?: string } {
-  const maxSize = 100 * 1024 * 1024; // Increased to 100MB for videos
+  const maxSize = 100 * 1024 * 1024; // 100MB for videos
   const allowedTypes = [
     // Images
-    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml',
-    // Videos - EXPANDED support
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/avif',
+    // Videos - Comprehensive list
     'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/avi', 
-    'video/x-ms-wmv', 'video/wmv', 'video/x-flv', 'video/3gpp', 'video/ogg'
+    'video/x-ms-wmv', 'video/wmv', 'video/x-flv', 'video/3gpp', 'video/ogg',
+    'video/mp4v-es', 'video/x-m4v', 'video/x-matroska'
   ];
 
   console.log(`🔍 Validating file: ${file.name}`);
   console.log(`📏 Size: ${file.size} bytes (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
   console.log(`🎭 Type: ${file.type}`);
+
+  if (file.size === 0) {
+    return { isValid: false, error: 'File is empty' };
+  }
 
   if (file.size > maxSize) {
     const sizeMB = (file.size / 1024 / 1024).toFixed(2);
@@ -365,16 +372,25 @@ function validateFile(file: File): { isValid: boolean; error?: string } {
   }
 
   if (!allowedTypes.includes(file.type)) {
-    return { isValid: false, error: `Invalid file type: ${file.type}. Only images and videos are allowed.` };
+    // Additional check for common video files that might have different MIME types
+    const fileName = file.name.toLowerCase();
+    const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv', '.m4v'];
+    const hasVideoExtension = videoExtensions.some(ext => fileName.endsWith(ext));
+    
+    if (!hasVideoExtension) {
+      return { isValid: false, error: `Invalid file type: ${file.type}. Only images and videos are allowed.` };
+    } else {
+      console.log(`⚠️ Video file with non-standard MIME type detected, allowing based on extension`);
+    }
   }
 
   console.log(`✅ File validation passed`);
   return { isValid: true };
 }
 
-// Helper function to generate filename with category prefix - BULLETPROOF NAMING
+// Enhanced filename generation
 function generateCategorizedFileName(category: string, originalName: string, mediaType: string): string {
-  const fileExtension = originalName.split('.').pop() || (mediaType === 'video' ? 'mp4' : 'jpg');
+  const fileExtension = originalName.split('.').pop()?.toLowerCase() || (mediaType === 'video' ? 'mp4' : 'jpg');
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
   
@@ -387,11 +403,10 @@ function generateCategorizedFileName(category: string, originalName: string, med
     .toLowerCase()
     .substring(0, 30); // Limit length
   
-  // BULLETPROOF filename format: categorized-gallery/category-name-timestamp-random.ext
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// BULLETPROOF POST handler - FIXED for video uploads
+// Enhanced POST handler with better video support
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -399,18 +414,35 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    console.log('\n🚀 BULLETPROOF UPLOAD PROCESS STARTED');
+    console.log('\n🚀 ENHANCED VIDEO UPLOAD PROCESS STARTED');
 
-    // SAFE FormData parsing with error handling
+    // Enhanced FormData parsing with timeout and better error handling
     let formData: FormData;
     try {
+      console.log('📋 Parsing FormData...');
+      const startTime = Date.now();
+      
       formData = await request.formData();
-      console.log('✅ FormData parsed successfully');
+      
+      const parseTime = Date.now() - startTime;
+      console.log(`✅ FormData parsed successfully in ${parseTime}ms`);
+      
+      // Log FormData contents for debugging
+      console.log('📋 FormData contents:');
+      for (const [key, value] of formData.entries()) {
+        if (value instanceof File) {
+          console.log(`  ${key}: File - ${value.name} (${value.size} bytes, ${value.type})`);
+        } else {
+          console.log(`  ${key}: ${value}`);
+        }
+      }
+      
     } catch (formDataError: any) {
       console.error('❌ FormData parsing failed:', formDataError);
       return NextResponse.json({ 
-        message: 'Failed to parse form data',
+        message: 'Failed to parse form data - this often happens with very large files or network issues',
         error: formDataError.message,
+        suggestion: 'Try uploading smaller files or check your network connection',
         timestamp: new Date().toISOString()
       }, { status: 400 });
     }
@@ -421,8 +453,8 @@ export async function POST(request: NextRequest) {
     const name = formData.get('name') as string;
     const subtitle = formData.get('subtitle') as string;
 
-    console.log('📁 Files:', mediaFiles.length);
-    console.log('📂 Category:', category);
+    console.log(`📁 Files to process: ${mediaFiles.length}`);
+    console.log(`📂 Target category: ${category}`);
 
     if (!mediaFiles || mediaFiles.length === 0) {
       return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
@@ -443,18 +475,18 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with BULLETPROOF filename-based approach
+    // Process each file with enhanced video handling
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
 
       console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length}`);
-      console.log('📄 Original name:', file.name);
-      console.log('📂 Category:', category);
-      console.log('📏 Size:', file.size, 'bytes');
-      console.log('🎭 Type:', file.type);
+      console.log(`📄 Original name: ${file.name}`);
+      console.log(`📂 Category: ${category}`);
+      console.log(`📏 Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+      console.log(`🎭 MIME type: ${file.type}`);
 
       try {
-        // Validate file - ENHANCED for videos
+        // Enhanced validation
         const validation = validateFile(file);
         if (!validation.isValid) {
           console.error('❌ File validation failed:', validation.error);
@@ -467,22 +499,30 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Determine media type - ENHANCED for videos
-        const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
+        // Determine media type with enhanced detection
+        const mediaType = getMediaType(file.name, file.type);
         console.log(`🎬 Determined media type: ${mediaType}`);
         
-        // Generate BULLETPROOF filename with category embedded
+        // Generate filename
         const blobFileName = generateCategorizedFileName(category, file.name, mediaType);
-        console.log('🏷️ Generated bulletproof filename:', blobFileName);
+        console.log(`🏷️ Generated filename: ${blobFileName}`);
 
-        // SAFE blob upload with enhanced error handling
-        console.log('⬆️ Uploading to blob storage...');
+        // Enhanced blob upload with video-specific optimizations
+        console.log('⬆️ Starting blob upload...');
         let blob;
         try {
+          const uploadStartTime = Date.now();
+          
           blob = await retryOperation(async () => {
-            return await put(blobFileName, file, {
+            console.log('📡 Attempting blob upload...');
+            
+            // Convert file to buffer for more reliable upload
+            const buffer = await file.arrayBuffer();
+            console.log(`💾 File converted to buffer: ${buffer.byteLength} bytes`);
+            
+            return await put(blobFileName, buffer, {
               access: 'public',
-              contentType: file.type,
+              contentType: file.type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
               token: token,
               addRandomSuffix: false,
               // Minimal metadata - not relied upon for functionality
@@ -490,12 +530,17 @@ export async function POST(request: NextRequest) {
                 category: category,
                 originalName: file.name,
                 uploadedAt: new Date().toISOString(),
-                type: mediaType
+                type: mediaType,
+                size: file.size.toString()
               }
             });
-          }, 3);
+          }, 3, mediaType === 'video');
+          
+          const uploadTime = Date.now() - uploadStartTime;
+          console.log(`✅ Upload completed in ${uploadTime}ms`);
+          
         } catch (uploadError: any) {
-          console.error('❌ Blob upload failed:', uploadError);
+          console.error('❌ Blob upload failed after retries:', uploadError);
           uploadResults.push({
             success: false,
             error: `Upload failed: ${uploadError.message}`,
@@ -505,8 +550,8 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        console.log('✅ Upload successful!');
-        console.log('🔗 Blob URL:', blob.url);
+        console.log(`✅ Upload successful!`);
+        console.log(`🔗 Blob URL: ${blob.url}`);
 
         // Parse the uploaded file to create media object
         const mediaItem = parseMediaFromFilename(
@@ -521,12 +566,10 @@ export async function POST(request: NextRequest) {
           throw new Error('Failed to parse uploaded file');
         }
 
-        // Override name if provided
+        // Override name and subtitle if provided
         if (name && name.trim()) {
           mediaItem.name = name.trim();
         }
-
-        // Override subtitle if provided
         if (subtitle && subtitle.trim()) {
           mediaItem.subtitle = subtitle.trim();
         }
@@ -537,10 +580,10 @@ export async function POST(request: NextRequest) {
           originalName: file.name
         });
 
-        console.log('✅ File processing complete for:', file.name);
+        console.log(`✅ File processing complete: ${mediaItem.name} (${mediaItem.type})`);
 
       } catch (error: any) {
-        console.error(`❌ Error uploading file ${file.name}:`, error);
+        console.error(`❌ Error processing file ${file.name}:`, error);
         uploadResults.push({
           success: false,
           error: error.message || 'Upload failed',
@@ -562,11 +605,10 @@ export async function POST(request: NextRequest) {
       message = `All ${failureCount} uploads failed`;
     }
 
-    console.log('\n📊 BULLETPROOF UPLOAD PROCESS COMPLETE');
-    console.log('✅ Success count:', successCount);
-    console.log('❌ Failure count:', failureCount);
+    console.log('\n📊 ENHANCED UPLOAD PROCESS COMPLETE');
+    console.log(`✅ Success count: ${successCount}`);
+    console.log(`❌ Failure count: ${failureCount}`);
 
-    // SAFE JSON response with proper error handling
     const responseData = { 
       message,
       results: uploadResults,
@@ -574,8 +616,6 @@ export async function POST(request: NextRequest) {
       failureCount,
       timestamp: new Date().toISOString()
     };
-
-    console.log('📤 Sending response:', JSON.stringify(responseData, null, 2));
 
     return NextResponse.json(responseData, {
       status: successCount > 0 ? 200 : 400,
@@ -592,40 +632,36 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('❌ Error in POST /api/admin/categorized-gallery:', error);
     
-    // SAFE error response
     const errorResponse = { 
-       message: 'Error uploading media', 
-       error: error.message || 'Unknown error',
-       timestamp: new Date().toISOString()
-     };
-     console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
-     return NextResponse.json(errorResponse, {
-       status: 500,
-       headers: {
-         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-         'Pragma': 'no-cache',
-         'Expires': '0',
-         'Surrogate-Control': 'no-store',
-         'X-Timestamp': new Date().toISOString(),
-         'Content-Type': 'application/json'
-       }
-     });
-    
+      message: 'Error uploading media', 
+      error: error.message || 'Unknown error',
+      timestamp: new Date().toISOString()
+    };
+
+    return NextResponse.json(errorResponse, {
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store',
+        'X-Timestamp': new Date().toISOString(),
+        'Content-Type': 'application/json'
+      }
+    });
   }
 }
 
-// DELETE handler to remove a categorized media item
+// DELETE handler
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const mediaId = searchParams.get('id');
-    const category = searchParams.get('category');
 
     if (!mediaId) {
       return NextResponse.json({ message: 'Media ID is required' }, { status: 400 });
     }
 
-    // Find the exact blob to delete
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     if (!token) {
       return NextResponse.json({ message: 'Storage token not configured' }, { status: 500 });
