@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 import { put, del, list } from '@vercel/blob';
 
 export const dynamic = 'force-dynamic';
@@ -589,9 +595,14 @@ export async function POST(request: NextRequest) {
 
     console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
 
-    return NextResponse.json(errorResponse, { 
+    return NextResponse.json(errorResponse, {
       status: 500,
       headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store',
+        'X-Timestamp': new Date().toISOString(),
         'Content-Type': 'application/json'
       }
     });
