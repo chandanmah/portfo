@@ -406,23 +406,32 @@ function generateCategorizedFileName(category: string, originalName: string, med
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Enhanced POST handler with better video support
+// Enhanced POST handler with better video support and error handling
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
-    return NextResponse.json({ message: 'BLOB_READ_WRITE_TOKEN is not configured' }, { status: 500 });
+    return NextResponse.json({ 
+      message: 'BLOB_READ_WRITE_TOKEN is not configured',
+      error: 'Storage configuration missing'
+    }, { status: 500 });
   }
 
   try {
     console.log('\n🚀 ENHANCED VIDEO UPLOAD PROCESS STARTED');
 
-    // Enhanced FormData parsing with timeout and better error handling
+    // Enhanced FormData parsing with better error handling
     let formData: FormData;
     try {
       console.log('📋 Parsing FormData...');
       const startTime = Date.now();
       
-      formData = await request.formData();
+      // Add timeout protection for FormData parsing
+      const parsePromise = request.formData();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('FormData parsing timeout')), 60000) // 60 second timeout
+      );
+      
+      formData = await Promise.race([parsePromise, timeoutPromise]) as FormData;
       
       const parseTime = Date.now() - startTime;
       console.log(`✅ FormData parsed successfully in ${parseTime}ms`);
@@ -440,9 +449,9 @@ export async function POST(request: NextRequest) {
     } catch (formDataError: any) {
       console.error('❌ FormData parsing failed:', formDataError);
       return NextResponse.json({ 
-        message: 'Failed to parse form data - this often happens with very large files or network issues',
+        message: 'Failed to parse form data',
         error: formDataError.message,
-        suggestion: 'Try uploading smaller files or check your network connection',
+        suggestion: 'File might be too large or request timed out',
         timestamp: new Date().toISOString()
       }, { status: 400 });
     }
@@ -457,13 +466,17 @@ export async function POST(request: NextRequest) {
     console.log(`📂 Target category: ${category}`);
 
     if (!mediaFiles || mediaFiles.length === 0) {
-      return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
+      return NextResponse.json({ 
+        message: 'No media files provided',
+        error: 'No files in request'
+      }, { status: 400 });
     }
 
     if (!category || !VALID_CATEGORIES.includes(category)) {
       return NextResponse.json({ 
         message: `Invalid or missing category. Must be one of: ${VALID_CATEGORIES.join(', ')}`,
-        receivedCategory: category
+        receivedCategory: category,
+        error: 'Invalid category'
       }, { status: 400 });
     }
 
