@@ -4,14 +4,15 @@ export const config = {
   api: {
     bodyParser: false,
   },
-  // Increased size limit for video uploads
+  // Increased size limit for video uploads to 500MB
   bodyParser: {
-    sizeLimit: '100mb',
+    sizeLimit: '500mb',
   },
 };
 
-// Add this at the top to handle large payloads
+// Increased duration and size limits for large video uploads
 export const maxDuration = 300; // 5 minutes for video uploads
+export const runtime = 'nodejs';
 
 import { put, del, list } from '@vercel/blob';
 
@@ -58,8 +59,8 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
       
       if (attempt === maxRetries) break;
       
-      // Longer delays for video uploads: 2s, 4s, 8s
-      const baseDelay = isVideo ? 2000 : 1000;
+      // Much longer delays for video uploads: 5s, 10s, 20s
+      const baseDelay = isVideo ? 5000 : 1000;
       const delay = Math.pow(2, attempt) * baseDelay;
       console.log(`⏱️ Waiting ${delay}ms before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -345,9 +346,9 @@ export async function GET() {
   }
 }
 
-// Enhanced file validation with specific video support
+// Enhanced file validation with larger video support
 function validateFile(file: File): { isValid: boolean; error?: string } {
-  const maxSize = 100 * 1024 * 1024; // 100MB for videos
+  const maxSize = 500 * 1024 * 1024; // 500MB for videos
   const allowedTypes = [
     // Images
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/avif',
@@ -406,7 +407,7 @@ function generateCategorizedFileName(category: string, originalName: string, med
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Enhanced POST handler with better video support and error handling
+// Enhanced POST handler with better video support and larger file handling
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -417,18 +418,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    console.log('\n🚀 ENHANCED VIDEO UPLOAD PROCESS STARTED');
+    console.log('\n🚀 ENHANCED LARGE VIDEO UPLOAD PROCESS STARTED');
 
-    // Enhanced FormData parsing with better error handling
+    // Enhanced FormData parsing with extended timeout for large files
     let formData: FormData;
     try {
-      console.log('📋 Parsing FormData...');
+      console.log('📋 Parsing FormData for large files...');
       const startTime = Date.now();
       
-      // Add timeout protection for FormData parsing
+      // Extended timeout for large video files (5 minutes)
       const parsePromise = request.formData();
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('FormData parsing timeout')), 60000) // 60 second timeout
+        setTimeout(() => reject(new Error('FormData parsing timeout - file too large')), 300000) // 5 minute timeout
       );
       
       formData = await Promise.race([parsePromise, timeoutPromise]) as FormData;
@@ -440,7 +441,7 @@ export async function POST(request: NextRequest) {
       console.log('📋 FormData contents:');
       for (const [key, value] of formData.entries()) {
         if (value instanceof File) {
-          console.log(`  ${key}: File - ${value.name} (${value.size} bytes, ${value.type})`);
+          console.log(`  ${key}: File - ${value.name} (${(value.size / 1024 / 1024).toFixed(2)} MB, ${value.type})`);
         } else {
           console.log(`  ${key}: ${value}`);
         }
@@ -451,9 +452,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         message: 'Failed to parse form data',
         error: formDataError.message,
-        suggestion: 'File might be too large or request timed out',
+        suggestion: 'File might be too large (max 500MB) or request timed out',
         timestamp: new Date().toISOString()
-      }, { status: 400 });
+      }, { status: 413 }); // 413 = Payload Too Large
     }
     
     // Handle both single and multiple file uploads
@@ -492,14 +493,14 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
 
-      console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length}`);
+      console.log(`\n📁 PROCESSING LARGE FILE ${i + 1}/${mediaFiles.length}`);
       console.log(`📄 Original name: ${file.name}`);
       console.log(`📂 Category: ${category}`);
       console.log(`📏 Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
       console.log(`🎭 MIME type: ${file.type}`);
 
       try {
-        // Enhanced validation
+        // Enhanced validation for larger files
         const validation = validateFile(file);
         if (!validation.isValid) {
           console.error('❌ File validation failed:', validation.error);
@@ -521,17 +522,17 @@ export async function POST(request: NextRequest) {
         console.log(`🏷️ Generated filename: ${blobFileName}`);
 
         // Enhanced blob upload with video-specific optimizations
-        console.log('⬆️ Starting blob upload...');
+        console.log('⬆️ Starting large file upload...');
         let blob;
         try {
           const uploadStartTime = Date.now();
           
           blob = await retryOperation(async () => {
-            console.log('📡 Attempting blob upload...');
+            console.log('📡 Attempting large file upload...');
             
             // Convert file to buffer for more reliable upload
             const buffer = await file.arrayBuffer();
-            console.log(`💾 File converted to buffer: ${buffer.byteLength} bytes`);
+            console.log(`💾 File converted to buffer: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
             
             return await put(blobFileName, buffer, {
               access: 'public',
@@ -550,10 +551,10 @@ export async function POST(request: NextRequest) {
           }, 3, mediaType === 'video');
           
           const uploadTime = Date.now() - uploadStartTime;
-          console.log(`✅ Upload completed in ${uploadTime}ms`);
+          console.log(`✅ Large file upload completed in ${uploadTime}ms`);
           
         } catch (uploadError: any) {
-          console.error('❌ Blob upload failed after retries:', uploadError);
+          console.error('❌ Large file upload failed after retries:', uploadError);
           uploadResults.push({
             success: false,
             error: `Upload failed: ${uploadError.message}`,
@@ -593,10 +594,10 @@ export async function POST(request: NextRequest) {
           originalName: file.name
         });
 
-        console.log(`✅ File processing complete: ${mediaItem.name} (${mediaItem.type})`);
+        console.log(`✅ Large file processing complete: ${mediaItem.name} (${mediaItem.type})`);
 
       } catch (error: any) {
-        console.error(`❌ Error processing file ${file.name}:`, error);
+        console.error(`❌ Error processing large file ${file.name}:`, error);
         uploadResults.push({
           success: false,
           error: error.message || 'Upload failed',
@@ -618,7 +619,7 @@ export async function POST(request: NextRequest) {
       message = `All ${failureCount} uploads failed`;
     }
 
-    console.log('\n📊 ENHANCED UPLOAD PROCESS COMPLETE');
+    console.log('\n📊 ENHANCED LARGE FILE UPLOAD PROCESS COMPLETE');
     console.log(`✅ Success count: ${successCount}`);
     console.log(`❌ Failure count: ${failureCount}`);
 
@@ -631,7 +632,7 @@ export async function POST(request: NextRequest) {
     };
 
     return NextResponse.json(responseData, {
-      status: successCount > 0 ? 200 : 400,
+      status: successCount > 0 ? 200 : 413, // Use 413 for payload too large
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
         'Pragma': 'no-cache',

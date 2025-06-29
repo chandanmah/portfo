@@ -455,7 +455,7 @@ const CategorizedGallerySection: React.FC = () => {
         </div>
       </div>
       
-      {/* Modal */}
+      {/* Enhanced Modal with Subtitles */}
       {isModalOpen && selectedMedia && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xl transition-opacity duration-300 ease-in-out w-full h-full min-h-screen min-w-screen p-4"
@@ -464,7 +464,7 @@ const CategorizedGallerySection: React.FC = () => {
           <div 
             ref={modalContentRef}
             tabIndex={-1}
-            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none"
+            className="relative bg-white/5 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-auto max-w-4xl w-full max-h-[95vh] flex flex-col p-4 sm:p-6 transition-all duration-300 ease-in-out scale-95 group-hover:scale-100 focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             <button 
@@ -517,11 +517,13 @@ const CategorizedGallerySection: React.FC = () => {
               )}
             </div>
             
-            {/* Text container for title and subtitle */}
-            <div className="text-center flex-shrink-0">
-              <h3 className="text-white text-2xl font-semibold mb-1">{selectedMedia.name}</h3>
-              {selectedMedia.subtitle && (
-                <p className="text-gray-300 text-md italic">{selectedMedia.subtitle}</p>
+            {/* Enhanced text container with subtitle support */}
+            <div className="text-center flex-shrink-0 mt-4">
+              <h3 className="text-white text-2xl font-semibold mb-2">{selectedMedia.name}</h3>
+              {selectedMedia.subtitle && selectedMedia.subtitle.trim() && (
+                <p className="text-gray-300 text-lg italic leading-relaxed max-w-2xl mx-auto">
+                  {selectedMedia.subtitle}
+                </p>
               )}
             </div>
           </div>

@@ -206,7 +206,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress({});
   };
 
-  // Enhanced upload handler with better error handling for videos
+  // Enhanced upload handler with better error handling for large videos
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       showNotification('Please select files to upload', 'error');
@@ -239,13 +239,13 @@ const CategorizedGalleryAdmin: React.FC = () => {
             [file.name]: { progress: 10, status: 'uploading' }
           }));
 
+          console.log(`🚀 Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
           const formData = new FormData();
           formData.append('media', file);
           formData.append('category', selectedCategory);
           formData.append('name', file.name.split('.')[0]);
           formData.append('subtitle', '');
-
-          console.log(`🚀 Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
           const response = await fetch('/api/admin/categorized-gallery', {
             method: 'POST',
@@ -262,7 +262,6 @@ const CategorizedGalleryAdmin: React.FC = () => {
             result = JSON.parse(responseText);
           } catch (parseError) {
             console.error('JSON parse error:', parseError);
-            console.error('Response text:', await response.text());
             
             // If JSON parsing fails, it might be an HTML error page
             throw new Error(`Server returned non-JSON response. This usually indicates a server error or file size limit exceeded.`);
@@ -543,7 +542,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Files (Images/Videos - Max 100MB each)
+              Select Files (Images/Videos - Max 500MB each)
             </label>
             <input
               id="media-upload"
@@ -554,7 +553,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Supported: Images (JPG, PNG, GIF, WebP) and Videos (MP4, WebM, MOV, AVI, etc.)
+              Supported: Images (JPG, PNG, GIF, WebP) and Videos (MP4, WebM, MOV, AVI, etc.) up to 500MB
             </p>
           </div>
 
