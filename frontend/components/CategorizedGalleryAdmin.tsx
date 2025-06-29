@@ -1,5 +1,3 @@
-'use client';
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 
@@ -134,7 +132,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [showNotification]); // Only depend on showNotification which is stable
+  }, [showNotification]);
 
   // Debug function to diagnose issues
   const runDiagnostics = useCallback(async () => {
@@ -206,7 +204,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress({});
   };
 
-  // STREAMING UPLOAD: Enhanced upload handler for Vercel platform
+  // STREAMING UPLOAD: New upload handler that bypasses Vercel payload limits
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       showNotification('Please select files to upload', 'error');
@@ -226,63 +224,85 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress(newUploadProgress);
 
     try {
-      // Upload files one by one for better progress tracking and Vercel compatibility
+      console.log('🚀 STARTING STREAMING UPLOAD PROCESS');
+      
       const results: UploadResult[] = [];
       
+      // Upload files one by one using streaming endpoint
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
         
         try {
+          console.log(`📁 Streaming upload ${i + 1}/${selectedFiles.length}: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+          
           // Update progress to show starting
           setUploadProgress(prev => ({
             ...prev,
             [file.name]: { progress: 10, status: 'uploading' }
           }));
 
-          console.log(`🚀 Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+          // Validate file size before upload
+          const maxSize = 45 * 1024 * 1024; // 45MB Vercel limit
+          if (file.size > maxSize) {
+            throw new Error(`File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds 45MB Vercel limit`);
+          }
 
-          const formData = new FormData();
-          formData.append('media', file);
-          formData.append('category', selectedCategory);
-          formData.append('name', file.name.split('.')[0]);
-          formData.append('subtitle', '');
+          // Create streaming upload URL with parameters
+          const uploadUrl = new URL('/api/admin/categorized-gallery/upload', window.location.origin);
+          uploadUrl.searchParams.set('category', selectedCategory);
+          uploadUrl.searchParams.set('name', file.name.split('.')[0]);
+          uploadUrl.searchParams.set('subtitle', '');
 
-          const response = await fetch('/api/admin/categorized-gallery', {
+          console.log(`📡 Streaming to: ${uploadUrl.toString()}`);
+
+          // STREAMING UPLOAD: Send file directly as body
+          const response = await fetch(uploadUrl.toString(), {
             method: 'POST',
-            body: formData,
+            body: file, // Send file directly as body
+            headers: {
+              'Content-Type': file.type || 'application/octet-stream',
+              'X-Filename': file.name,
+              'Content-Length': file.size.toString()
+            }
           });
 
-          // Enhanced response handling for better error detection
+          console.log(`📊 Response status: ${response.status}`);
+
+          // Handle response
           let result;
           try {
             const responseText = await response.text();
-            console.log('Raw response:', responseText.substring(0, 200));
+            console.log('📄 Raw response preview:', responseText.substring(0, 200));
             
-            // Try to parse as JSON
             result = JSON.parse(responseText);
           } catch (parseError) {
-            console.error('JSON parse error:', parseError);
-            
-            // If JSON parsing fails, it might be an HTML error page or Vercel limit
-            throw new Error(`Server returned non-JSON response. This usually indicates a Vercel platform limit or server error. Try smaller files (under 50MB).`);
+            console.error('❌ JSON parse error:', parseError);
+            throw new Error('Server returned invalid response. This usually indicates a Vercel platform limit.');
           }
 
-          if (response.ok && result.results && result.results[0]) {
-            const uploadResult = result.results[0];
-            results.push(uploadResult);
+          if (response.ok && result.success) {
+            results.push({
+              success: true,
+              media: result.media,
+              originalName: file.name
+            });
             
             setUploadProgress(prev => ({
               ...prev,
               [file.name]: { 
                 progress: 100, 
-                status: uploadResult.success ? 'success' : 'error',
-                error: uploadResult.error
+                status: 'success'
               }
             }));
+
+            console.log(`✅ Successfully uploaded: ${file.name}`);
           } else {
+            const errorMessage = result.error || result.message || 'Upload failed';
+            console.error(`❌ Upload failed for ${file.name}:`, errorMessage);
+            
             results.push({
               success: false,
-              error: result.message || result.error || 'Upload failed',
+              error: errorMessage,
               originalName: file.name
             });
             
@@ -291,15 +311,24 @@ const CategorizedGalleryAdmin: React.FC = () => {
               [file.name]: { 
                 progress: 0, 
                 status: 'error',
-                error: result.message || result.error || 'Upload failed'
+                error: errorMessage
               }
             }));
           }
+
         } catch (error: any) {
-          console.error(`Error uploading ${file.name}:`, error);
+          console.error(`❌ Error uploading ${file.name}:`, error);
+          
+          let errorMessage = error.message || 'Network error';
+          
+          // Detect Vercel payload limit errors
+          if (error.message?.includes('413') || error.message?.includes('too large') || error.message?.includes('FUNCTION_PAYLOAD_TOO_LARGE')) {
+            errorMessage = 'File too large for Vercel platform (try files under 45MB)';
+          }
+          
           results.push({
             success: false,
-            error: error.message || 'Network error',
+            error: errorMessage,
             originalName: file.name
           });
           
@@ -308,7 +337,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
             [file.name]: { 
               progress: 0, 
               status: 'error',
-              error: error.message || 'Network error'
+              error: errorMessage
             }
           }));
         }
@@ -316,6 +345,8 @@ const CategorizedGalleryAdmin: React.FC = () => {
 
       const successCount = results.filter(r => r.success).length;
       const failureCount = results.filter(r => !r.success).length;
+
+      console.log(`📊 Upload complete: ${successCount} success, ${failureCount} failed`);
 
       if (successCount > 0) {
         showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
@@ -330,12 +361,13 @@ const CategorizedGalleryAdmin: React.FC = () => {
       }
 
       if (failureCount > 0) {
-        showNotification(`${failureCount} upload(s) failed`, 'error');
+        const failedFiles = results.filter(r => !r.success).map(r => r.originalName).join(', ');
+        showNotification(`${failureCount} upload(s) failed: ${failedFiles}`, 'error');
       }
 
-    } catch (error) {
-      console.error('Error uploading media:', error);
-      showNotification('Error uploading media', 'error');
+    } catch (error: any) {
+      console.error('❌ Error in upload process:', error);
+      showNotification('Error uploading media: ' + error.message, 'error');
     } finally {
       setUploading(false);
       
@@ -542,7 +574,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Files (Images/Videos - Max 50MB each)
+              Select Files (Images/Videos - Max 45MB each)
             </label>
             <input
               id="media-upload"
@@ -553,7 +585,8 @@ const CategorizedGalleryAdmin: React.FC = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Supported: Images (JPG, PNG, GIF, WebP) and Videos (MP4, WebM, MOV, AVI, etc.) up to 50MB (Vercel platform limit)
+              <strong>Vercel Platform Limit:</strong> Files must be under 45MB. 
+              Supported: Images (JPG, PNG, GIF, WebP) and Videos (MP4, WebM, MOV, AVI, etc.)
             </p>
           </div>
 
@@ -597,7 +630,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
             disabled={uploading || !selectedFiles}
             className={`${buttonStyle} bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-400 disabled:cursor-not-allowed`}
           >
-            {uploading ? 'Uploading...' : 'Upload Media'}
+            {uploading ? 'Streaming Upload...' : 'Upload Media'}
           </button>
         </div>
       </div>
