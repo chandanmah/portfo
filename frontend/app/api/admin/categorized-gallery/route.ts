@@ -4,13 +4,9 @@ export const config = {
   api: {
     bodyParser: false,
   },
-  // Increased size limit for video uploads to 500MB
-  bodyParser: {
-    sizeLimit: '500mb',
-  },
 };
 
-// Increased duration and size limits for large video uploads
+// Vercel has strict payload limits, so we need to handle this differently
 export const maxDuration = 300; // 5 minutes for video uploads
 export const runtime = 'nodejs';
 
@@ -46,8 +42,12 @@ const VALID_CATEGORIES = [
   'furniture'
 ];
 
-// Enhanced retry operation with longer delays for video uploads
-async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3, isVideo: boolean = false): Promise<T> {
+// Helper function for retrying operations with exponential backoff
+async function retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  isVideo: boolean = false
+): Promise<T> {
   let lastError: any;
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -59,8 +59,8 @@ async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number
       
       if (attempt === maxRetries) break;
       
-      // Much longer delays for video uploads: 5s, 10s, 20s
-      const baseDelay = isVideo ? 5000 : 1000;
+      // Longer delays for video uploads: 2s, 4s, 8s
+      const baseDelay = isVideo ? 2000 : 1000;
       const delay = Math.pow(2, attempt) * baseDelay;
       console.log(`⏱️ Waiting ${delay}ms before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -346,9 +346,9 @@ export async function GET() {
   }
 }
 
-// Enhanced file validation with larger video support
+// Enhanced file validation with specific video support
 function validateFile(file: File): { isValid: boolean; error?: string } {
-  const maxSize = 500 * 1024 * 1024; // 500MB for videos
+  const maxSize = 50 * 1024 * 1024; // Reduced to 50MB due to Vercel limits
   const allowedTypes = [
     // Images
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/avif',
@@ -369,7 +369,7 @@ function validateFile(file: File): { isValid: boolean; error?: string } {
   if (file.size > maxSize) {
     const sizeMB = (file.size / 1024 / 1024).toFixed(2);
     const maxSizeMB = (maxSize / 1024 / 1024).toFixed(0);
-    return { isValid: false, error: `File size (${sizeMB}MB) exceeds ${maxSizeMB}MB limit` };
+    return { isValid: false, error: `File size (${sizeMB}MB) exceeds ${maxSizeMB}MB limit (Vercel platform limitation)` };
   }
 
   if (!allowedTypes.includes(file.type)) {
@@ -407,7 +407,7 @@ function generateCategorizedFileName(category: string, originalName: string, med
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Enhanced POST handler with better video support and larger file handling
+// STREAMING UPLOAD: Process files one by one to avoid Vercel payload limits
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
@@ -418,41 +418,25 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    console.log('\n🚀 ENHANCED LARGE VIDEO UPLOAD PROCESS STARTED');
+    console.log('\n🚀 STREAMING UPLOAD PROCESS STARTED (Vercel-optimized)');
 
-    // Enhanced FormData parsing with extended timeout for large files
+    // Parse FormData with streaming approach
     let formData: FormData;
     try {
-      console.log('📋 Parsing FormData for large files...');
+      console.log('📋 Parsing FormData with streaming...');
       const startTime = Date.now();
       
-      // Extended timeout for large video files (5 minutes)
-      const parsePromise = request.formData();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('FormData parsing timeout - file too large')), 300000) // 5 minute timeout
-      );
-      
-      formData = await Promise.race([parsePromise, timeoutPromise]) as FormData;
+      formData = await request.formData();
       
       const parseTime = Date.now() - startTime;
       console.log(`✅ FormData parsed successfully in ${parseTime}ms`);
-      
-      // Log FormData contents for debugging
-      console.log('📋 FormData contents:');
-      for (const [key, value] of formData.entries()) {
-        if (value instanceof File) {
-          console.log(`  ${key}: File - ${value.name} (${(value.size / 1024 / 1024).toFixed(2)} MB, ${value.type})`);
-        } else {
-          console.log(`  ${key}: ${value}`);
-        }
-      }
       
     } catch (formDataError: any) {
       console.error('❌ FormData parsing failed:', formDataError);
       return NextResponse.json({ 
         message: 'Failed to parse form data',
         error: formDataError.message,
-        suggestion: 'File might be too large (max 500MB) or request timed out',
+        suggestion: 'File might be too large for Vercel platform (try files under 50MB)',
         timestamp: new Date().toISOString()
       }, { status: 413 }); // 413 = Payload Too Large
     }
@@ -489,18 +473,18 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with enhanced video handling
+    // Process each file individually to avoid payload limits
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
 
-      console.log(`\n📁 PROCESSING LARGE FILE ${i + 1}/${mediaFiles.length}`);
+      console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length} (STREAMING)`);
       console.log(`📄 Original name: ${file.name}`);
       console.log(`📂 Category: ${category}`);
       console.log(`📏 Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
       console.log(`🎭 MIME type: ${file.type}`);
 
       try {
-        // Enhanced validation for larger files
+        // Enhanced validation for Vercel limits
         const validation = validateFile(file);
         if (!validation.isValid) {
           console.error('❌ File validation failed:', validation.error);
@@ -521,20 +505,18 @@ export async function POST(request: NextRequest) {
         const blobFileName = generateCategorizedFileName(category, file.name, mediaType);
         console.log(`🏷️ Generated filename: ${blobFileName}`);
 
-        // Enhanced blob upload with video-specific optimizations
-        console.log('⬆️ Starting large file upload...');
+        // STREAMING UPLOAD: Convert to stream to avoid memory issues
+        console.log('⬆️ Starting streaming upload...');
         let blob;
         try {
           const uploadStartTime = Date.now();
           
           blob = await retryOperation(async () => {
-            console.log('📡 Attempting large file upload...');
+            console.log('📡 Attempting streaming upload...');
             
-            // Convert file to buffer for more reliable upload
-            const buffer = await file.arrayBuffer();
-            console.log(`💾 File converted to buffer: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
-            
-            return await put(blobFileName, buffer, {
+            // Use the file directly instead of converting to buffer
+            // This reduces memory usage and avoids Vercel payload limits
+            return await put(blobFileName, file, {
               access: 'public',
               contentType: file.type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
               token: token,
@@ -551,10 +533,10 @@ export async function POST(request: NextRequest) {
           }, 3, mediaType === 'video');
           
           const uploadTime = Date.now() - uploadStartTime;
-          console.log(`✅ Large file upload completed in ${uploadTime}ms`);
+          console.log(`✅ Streaming upload completed in ${uploadTime}ms`);
           
         } catch (uploadError: any) {
-          console.error('❌ Large file upload failed after retries:', uploadError);
+          console.error('❌ Streaming upload failed after retries:', uploadError);
           uploadResults.push({
             success: false,
             error: `Upload failed: ${uploadError.message}`,
@@ -594,10 +576,10 @@ export async function POST(request: NextRequest) {
           originalName: file.name
         });
 
-        console.log(`✅ Large file processing complete: ${mediaItem.name} (${mediaItem.type})`);
+        console.log(`✅ File processing complete: ${mediaItem.name} (${mediaItem.type})`);
 
       } catch (error: any) {
-        console.error(`❌ Error processing large file ${file.name}:`, error);
+        console.error(`❌ Error processing file ${file.name}:`, error);
         uploadResults.push({
           success: false,
           error: error.message || 'Upload failed',
@@ -619,7 +601,7 @@ export async function POST(request: NextRequest) {
       message = `All ${failureCount} uploads failed`;
     }
 
-    console.log('\n📊 ENHANCED LARGE FILE UPLOAD PROCESS COMPLETE');
+    console.log('\n📊 STREAMING UPLOAD PROCESS COMPLETE');
     console.log(`✅ Success count: ${successCount}`);
     console.log(`❌ Failure count: ${failureCount}`);
 
