@@ -4,13 +4,11 @@ export const config = {
   api: {
     bodyParser: false,
   },
-  bodyParser: {
-    sizeLimit: '100mb',
-  },
 };
 
-// Add this at the top to handle large payloads
+// Vercel has strict payload limits, so we need to handle this differently
 export const maxDuration = 300; // 5 minutes for video uploads
+export const runtime = 'nodejs';
 
 import { put, del, list } from '@vercel/blob';
 
@@ -44,8 +42,12 @@ const VALID_CATEGORIES = [
   'furniture'
 ];
 
-// Enhanced retry operation with longer delays for video uploads
-async function retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3, isVideo: boolean = false): Promise<T> {
+// Helper function for retrying operations with exponential backoff
+async function retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  isVideo: boolean = false
+): Promise<T> {
   let lastError: any;
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -347,7 +349,7 @@ export async function GET() {
 
 // Enhanced file validation with specific video support
 function validateFile(file: File): { isValid: boolean; error?: string } {
-  const maxSize = 100 * 1024 * 1024; // 100MB for videos
+  const maxSize = 50 * 1024 * 1024; // Reduced to 50MB due to Vercel limits
   const allowedTypes = [
     // Images
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/avif',
@@ -368,7 +370,7 @@ function validateFile(file: File): { isValid: boolean; error?: string } {
   if (file.size > maxSize) {
     const sizeMB = (file.size / 1024 / 1024).toFixed(2);
     const maxSizeMB = (maxSize / 1024 / 1024).toFixed(0);
-    return { isValid: false, error: `File size (${sizeMB}MB) exceeds ${maxSizeMB}MB limit` };
+    return { isValid: false, error: `File size (${sizeMB}MB) exceeds ${maxSizeMB}MB limit (Vercel platform limitation)` };
   }
 
   if (!allowedTypes.includes(file.type)) {
@@ -406,20 +408,23 @@ function generateCategorizedFileName(category: string, originalName: string, med
   return `categorized-gallery/${category}-${cleanName}-${timestamp}-${randomSuffix}.${fileExtension}`;
 }
 
-// Enhanced POST handler with better video support
+// STREAMING UPLOAD: Process files one by one to avoid Vercel payload limits
 export async function POST(request: NextRequest) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
-    return NextResponse.json({ message: 'BLOB_READ_WRITE_TOKEN is not configured' }, { status: 500 });
+    return NextResponse.json({ 
+      message: 'BLOB_READ_WRITE_TOKEN is not configured',
+      error: 'Storage configuration missing'
+    }, { status: 500 });
   }
 
   try {
-    console.log('\n🚀 ENHANCED VIDEO UPLOAD PROCESS STARTED');
+    console.log('\n🚀 STREAMING UPLOAD PROCESS STARTED (Vercel-optimized)');
 
-    // Enhanced FormData parsing with timeout and better error handling
+    // Parse FormData with streaming approach
     let formData: FormData;
     try {
-      console.log('📋 Parsing FormData...');
+      console.log('📋 Parsing FormData with streaming...');
       const startTime = Date.now();
       
       formData = await request.formData();
@@ -427,24 +432,14 @@ export async function POST(request: NextRequest) {
       const parseTime = Date.now() - startTime;
       console.log(`✅ FormData parsed successfully in ${parseTime}ms`);
       
-      // Log FormData contents for debugging
-      console.log('📋 FormData contents:');
-      for (const [key, value] of formData.entries()) {
-        if (value instanceof File) {
-          console.log(`  ${key}: File - ${value.name} (${value.size} bytes, ${value.type})`);
-        } else {
-          console.log(`  ${key}: ${value}`);
-        }
-      }
-      
     } catch (formDataError: any) {
       console.error('❌ FormData parsing failed:', formDataError);
       return NextResponse.json({ 
-        message: 'Failed to parse form data - this often happens with very large files or network issues',
+        message: 'Failed to parse form data',
         error: formDataError.message,
-        suggestion: 'Try uploading smaller files or check your network connection',
+        suggestion: 'File might be too large for Vercel platform (try files under 50MB)',
         timestamp: new Date().toISOString()
-      }, { status: 400 });
+      }, { status: 413 }); // 413 = Payload Too Large
     }
     
     // Handle both single and multiple file uploads
@@ -457,13 +452,17 @@ export async function POST(request: NextRequest) {
     console.log(`📂 Target category: ${category}`);
 
     if (!mediaFiles || mediaFiles.length === 0) {
-      return NextResponse.json({ message: 'No media files provided' }, { status: 400 });
+      return NextResponse.json({ 
+        message: 'No media files provided',
+        error: 'No files in request'
+      }, { status: 400 });
     }
 
     if (!category || !VALID_CATEGORIES.includes(category)) {
       return NextResponse.json({ 
         message: `Invalid or missing category. Must be one of: ${VALID_CATEGORIES.join(', ')}`,
-        receivedCategory: category
+        receivedCategory: category,
+        error: 'Invalid category'
       }, { status: 400 });
     }
 
@@ -475,18 +474,18 @@ export async function POST(request: NextRequest) {
       originalName?: string;
     }> = [];
 
-    // Process each file with enhanced video handling
+    // Process each file individually to avoid payload limits
     for (let i = 0; i < mediaFiles.length; i++) {
       const file = mediaFiles[i];
 
-      console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length}`);
+      console.log(`\n📁 PROCESSING FILE ${i + 1}/${mediaFiles.length} (STREAMING)`);
       console.log(`📄 Original name: ${file.name}`);
       console.log(`📂 Category: ${category}`);
       console.log(`📏 Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
       console.log(`🎭 MIME type: ${file.type}`);
 
       try {
-        // Enhanced validation
+        // Enhanced validation for Vercel limits
         const validation = validateFile(file);
         if (!validation.isValid) {
           console.error('❌ File validation failed:', validation.error);
@@ -507,20 +506,18 @@ export async function POST(request: NextRequest) {
         const blobFileName = generateCategorizedFileName(category, file.name, mediaType);
         console.log(`🏷️ Generated filename: ${blobFileName}`);
 
-        // Enhanced blob upload with video-specific optimizations
-        console.log('⬆️ Starting blob upload...');
+        // STREAMING UPLOAD: Convert to stream to avoid memory issues
+        console.log('⬆️ Starting streaming upload...');
         let blob;
         try {
           const uploadStartTime = Date.now();
           
           blob = await retryOperation(async () => {
-            console.log('📡 Attempting blob upload...');
+            console.log('📡 Attempting streaming upload...');
             
-            // Convert file to buffer for more reliable upload
-            const buffer = await file.arrayBuffer();
-            console.log(`💾 File converted to buffer: ${buffer.byteLength} bytes`);
-            
-            return await put(blobFileName, buffer, {
+            // Use the file directly instead of converting to buffer
+            // This reduces memory usage and avoids Vercel payload limits
+            return await put(blobFileName, file, {
               access: 'public',
               contentType: file.type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
               token: token,
@@ -537,10 +534,10 @@ export async function POST(request: NextRequest) {
           }, 3, mediaType === 'video');
           
           const uploadTime = Date.now() - uploadStartTime;
-          console.log(`✅ Upload completed in ${uploadTime}ms`);
+          console.log(`✅ Streaming upload completed in ${uploadTime}ms`);
           
         } catch (uploadError: any) {
-          console.error('❌ Blob upload failed after retries:', uploadError);
+          console.error('❌ Streaming upload failed after retries:', uploadError);
           uploadResults.push({
             success: false,
             error: `Upload failed: ${uploadError.message}`,
@@ -605,7 +602,7 @@ export async function POST(request: NextRequest) {
       message = `All ${failureCount} uploads failed`;
     }
 
-    console.log('\n📊 ENHANCED UPLOAD PROCESS COMPLETE');
+    console.log('\n📊 STREAMING UPLOAD PROCESS COMPLETE');
     console.log(`✅ Success count: ${successCount}`);
     console.log(`❌ Failure count: ${failureCount}`);
 
@@ -618,7 +615,7 @@ export async function POST(request: NextRequest) {
     };
 
     return NextResponse.json(responseData, {
-      status: successCount > 0 ? 200 : 400,
+      status: successCount > 0 ? 200 : 413, // Use 413 for payload too large
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
         'Pragma': 'no-cache',

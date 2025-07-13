@@ -33,6 +33,8 @@ interface UploadProgress {
     progress: number;
     status: 'uploading' | 'success' | 'error';
     error?: string;
+    chunksUploaded?: number;
+    totalChunks?: number;
   };
 }
 
@@ -134,7 +136,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [showNotification]); // Only depend on showNotification which is stable
+  }, [showNotification]);
 
   // Debug function to diagnose issues
   const runDiagnostics = useCallback(async () => {
@@ -201,7 +203,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
       isComponentMountedRef.current = false;
       fetchingRef.current = false;
     };
-  }, []); // Empty dependency array - only run once
+  }, []);
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -209,7 +211,91 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress({});
   };
 
-  // Handle media upload with improved progress tracking and error handling
+  // CHUNKED UPLOAD: Break large files into chunks under Vercel's 4.5MB limit
+  const uploadFileInChunks = async (file: File): Promise<CategorizedMedia> => {
+    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB chunks (safe under Vercel's 4.5MB limit)
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const fileId = `${Date.now()}-${Math.random().toString(36).substring(2)}`;
+    
+    console.log(`🧩 Starting chunked upload: ${file.name}`);
+    console.log(`📊 File size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`🔢 Total chunks: ${totalChunks}`);
+
+    // Update progress to show chunked upload starting
+    setUploadProgress(prev => ({
+      ...prev,
+      [file.name]: {
+        progress: 0,
+        status: 'uploading',
+        chunksUploaded: 0,
+        totalChunks: totalChunks
+      }
+    }));
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+
+      console.log(`📦 Uploading chunk ${chunkIndex + 1}/${totalChunks} (${(chunk.size / 1024).toFixed(2)} KB)`);
+
+      const formData = new FormData();
+      formData.append('chunk', chunk);
+      formData.append('chunkIndex', chunkIndex.toString());
+      formData.append('totalChunks', totalChunks.toString());
+      formData.append('fileId', fileId);
+      formData.append('originalName', file.name);
+      formData.append('category', selectedCategory);
+      formData.append('name', file.name.split('.')[0]);
+      formData.append('subtitle', '');
+      formData.append('contentType', file.type);
+
+      const response = await fetch('/api/admin/categorized-gallery/upload-chunk', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `Chunk ${chunkIndex + 1} upload failed`);
+      }
+
+      const result = await response.json();
+      
+      // Update progress
+      const progress = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: {
+          progress: progress,
+          status: 'uploading',
+          chunksUploaded: chunkIndex + 1,
+          totalChunks: totalChunks
+        }
+      }));
+
+      // If this was the last chunk and assembly is complete
+      if (result.complete && result.media) {
+        console.log(`✅ Chunked upload complete: ${file.name}`);
+        
+        setUploadProgress(prev => ({
+          ...prev,
+          [file.name]: {
+            progress: 100,
+            status: 'success',
+            chunksUploaded: totalChunks,
+            totalChunks: totalChunks
+          }
+        }));
+
+        return result.media;
+      }
+    }
+
+    throw new Error('Upload completed but no media object returned');
+  };
+
+  // CHUNKED UPLOAD: New upload handler
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       showNotification('Please select files to upload', 'error');
@@ -229,65 +315,58 @@ const CategorizedGalleryAdmin: React.FC = () => {
     setUploadProgress(newUploadProgress);
 
     try {
-      // Upload files one by one for better progress tracking
+      console.log('🚀 STARTING CHUNKED UPLOAD PROCESS');
+      
       const results: UploadResult[] = [];
       
+      // Upload files one by one using chunked upload
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
         
         try {
-          // Update progress to show starting
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: { progress: 10, status: 'uploading' }
-          }));
+          console.log(`📁 Processing file ${i + 1}/${selectedFiles.length}: ${file.name}`);
+          
+          // Validate file size (increased limit since we're chunking)
+          const maxSize = 500 * 1024 * 1024; // 500MB max (will be chunked)
+          if (file.size > maxSize) {
+            throw new Error(`File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds 500MB limit`);
+          }
 
-          const formData = new FormData();
-          formData.append('media', file);
-          formData.append('category', selectedCategory);
-          formData.append('name', file.name.split('.')[0]);
-          formData.append('subtitle', '');
+          // Validate file type
+          const allowedTypes = [
+            'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/avif',
+            'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/avi', 
+            'video/x-ms-wmv', 'video/wmv', 'video/x-flv', 'video/3gpp', 'video/ogg',
+            'video/mp4v-es', 'video/x-m4v', 'video/x-matroska'
+          ];
 
-          const response = await fetch('/api/admin/categorized-gallery', {
-            method: 'POST',
-            body: formData,
+          if (!allowedTypes.includes(file.type)) {
+            // Check by extension as fallback
+            const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.wmv', '.m4v'];
+            const hasVideoExtension = videoExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+            
+            if (!hasVideoExtension) {
+              throw new Error(`File type ${file.type} not supported`);
+            }
+          }
+
+          // Upload using chunked method
+          const media = await uploadFileInChunks(file);
+          
+          results.push({
+            success: true,
+            media: media,
+            originalName: file.name
           });
 
-          const result = await response.json();
+          console.log(`✅ Successfully uploaded: ${file.name}`);
 
-          if (response.ok && result.results && result.results[0]) {
-            const uploadResult = result.results[0];
-            results.push(uploadResult);
-            
-            setUploadProgress(prev => ({
-              ...prev,
-              [file.name]: { 
-                progress: 100, 
-                status: uploadResult.success ? 'success' : 'error',
-                error: uploadResult.error
-              }
-            }));
-          } else {
-            results.push({
-              success: false,
-              error: result.message || 'Upload failed',
-              originalName: file.name
-            });
-            
-            setUploadProgress(prev => ({
-              ...prev,
-              [file.name]: { 
-                progress: 0, 
-                status: 'error',
-                error: result.message || 'Upload failed'
-              }
-            }));
-          }
         } catch (error: any) {
-          console.error(`Error uploading ${file.name}:`, error);
+          console.error(`❌ Error uploading ${file.name}:`, error);
+          
           results.push({
             success: false,
-            error: error.message || 'Network error',
+            error: error.message || 'Upload failed',
             originalName: file.name
           });
           
@@ -296,7 +375,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
             [file.name]: { 
               progress: 0, 
               status: 'error',
-              error: error.message || 'Network error'
+              error: error.message || 'Upload failed'
             }
           }));
         }
@@ -304,6 +383,8 @@ const CategorizedGalleryAdmin: React.FC = () => {
 
       const successCount = results.filter(r => r.success).length;
       const failureCount = results.filter(r => !r.success).length;
+
+      console.log(`📊 Upload complete: ${successCount} success, ${failureCount} failed`);
 
       if (successCount > 0) {
         showNotification(`Successfully uploaded ${successCount} file(s)`, 'success');
@@ -321,12 +402,13 @@ const CategorizedGalleryAdmin: React.FC = () => {
       }
 
       if (failureCount > 0) {
-        showNotification(`${failureCount} upload(s) failed`, 'error');
+        const failedFiles = results.filter(r => !r.success).map(r => r.originalName).join(', ');
+        showNotification(`${failureCount} upload(s) failed: ${failedFiles}`, 'error');
       }
 
-    } catch (error) {
-      console.error('Error uploading media:', error);
-      showNotification('Error uploading media', 'error');
+    } catch (error: any) {
+      console.error('❌ Error in upload process:', error);
+      showNotification('Error uploading media: ' + error.message, 'error');
     } finally {
       setUploading(false);
       
@@ -515,7 +597,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
       
       {/* Upload Section */}
       <div className="bg-gray-50 rounded-lg p-4">
-        <h3 className="text-lg font-semibold mb-4">Upload New Media</h3>
+        <h3 className="text-lg font-semibold mb-4">Upload New Media (Chunked Upload)</h3>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -539,7 +621,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Files (Images/Videos)
+              Select Files (Images/Videos - Up to 500MB each)
             </label>
             <input
               id="media-upload"
@@ -549,6 +631,10 @@ const CategorizedGalleryAdmin: React.FC = () => {
               onChange={handleFileChange}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              <strong>Chunked Upload:</strong> Large files are automatically split into 4MB chunks to bypass Vercel limits. 
+              Supports files up to 500MB. Videos and images are fully supported.
+            </p>
           </div>
 
           {/* Upload Progress */}
@@ -565,7 +651,8 @@ const CategorizedGalleryAdmin: React.FC = () => {
                       'bg-blue-100 text-blue-800'
                     }`}>
                       {progress.status === 'success' ? 'Success' :
-                       progress.status === 'error' ? 'Failed' : 'Uploading'}
+                       progress.status === 'error' ? 'Failed' : 
+                       progress.chunksUploaded ? `Chunk ${progress.chunksUploaded}/${progress.totalChunks}` : 'Uploading'}
                     </span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
@@ -581,6 +668,11 @@ const CategorizedGalleryAdmin: React.FC = () => {
                   {progress.error && (
                     <p className="text-xs text-red-600 mt-1">{progress.error}</p>
                   )}
+                  {progress.chunksUploaded && progress.totalChunks && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Chunks: {progress.chunksUploaded}/{progress.totalChunks} ({progress.progress}%)
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -591,7 +683,7 @@ const CategorizedGalleryAdmin: React.FC = () => {
             disabled={uploading || !selectedFiles}
             className={`${buttonStyle} bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-400 disabled:cursor-not-allowed`}
           >
-            {uploading ? 'Uploading...' : 'Upload Media'}
+            {uploading ? 'Chunked Upload in Progress...' : 'Upload Media (Chunked)'}
           </button>
         </div>
       </div>
