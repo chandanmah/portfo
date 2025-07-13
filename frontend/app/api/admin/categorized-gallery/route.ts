@@ -4,7 +4,6 @@ export const config = {
   api: {
     bodyParser: false,
   },
-  // Increased size limit for video uploads
   bodyParser: {
     sizeLimit: '100mb',
   },
@@ -228,6 +227,7 @@ async function readCategorizedDataFromBlobs(): Promise<CategoryData> {
       console.log('🚀 BULLETPROOF: Reading categorized data using filename parsing...');
       
       const { blobs } = await list({
+        prefix: 'categorized-gallery/',
         token,
         limit: 1000
       });
@@ -667,8 +667,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ message: 'Storage token not configured' }, { status: 500 });
     }
 
-    // List blobs to find the exact match
-    const { blobs } = await list({
+  // List blobs within categorized-gallery to find the exact match
+  const { blobs } = await list({
+      prefix: 'categorized-gallery/',
       token,
       limit: 1000
     });

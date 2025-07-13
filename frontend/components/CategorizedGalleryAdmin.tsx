@@ -178,6 +178,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
         // Refresh data after fixing
         await fetchCategorizedData(false);
         
+        // Notify public gallery of changes
+        localStorage.setItem('gallery-updated', Date.now().toString());
+        
         // Re-run diagnostics
         await runDiagnostics();
       }
@@ -312,6 +315,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
         
         // Refresh data immediately
         await fetchCategorizedData(false);
+        
+        // Notify public gallery of changes
+        localStorage.setItem('gallery-updated', Date.now().toString());
       }
 
       if (failureCount > 0) {
@@ -362,6 +368,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
         
         // Refresh data immediately
         await fetchCategorizedData(false);
+        
+        // Notify public gallery of changes
+        localStorage.setItem('gallery-updated', Date.now().toString());
       } else {
         const error = await response.json();
         showNotification(error.message || 'Failed to update media', 'error');
@@ -389,6 +398,9 @@ const CategorizedGalleryAdmin: React.FC = () => {
         
         // Refresh data immediately
         await fetchCategorizedData(false);
+        
+        // Notify public gallery of changes
+        localStorage.setItem('gallery-updated', Date.now().toString());
       } else {
         const error = await response.json();
         showNotification(error.message || 'Failed to delete media', 'error');

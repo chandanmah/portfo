@@ -73,8 +73,7 @@ const CategorizedGallerySection: React.FC = () => {
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
   const [lastSync, setLastSync] = useState<string>('');
   
-  // Refs for real-time updates
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Refs for component lifecycle
   const isComponentMountedRef = useRef(true);
 
   useEffect(() => {
@@ -156,7 +155,7 @@ const CategorizedGallerySection: React.FC = () => {
     }
   }, []); // Empty dependency array since this function doesn't depend on any state
 
-  // Real-time sync function for public gallery - memoized to prevent infinite loops
+  // Manual sync function for when changes are detected
   const syncData = useCallback(async () => {
     if (!lastSync) return; // Don't sync if we haven't done initial fetch
     
@@ -175,6 +174,7 @@ const CategorizedGallerySection: React.FC = () => {
         if (hasChanges && isComponentMountedRef.current) {
           setCategoryData(data);
           setLastSync(newLastSync);
+          console.log('Gallery data updated with new changes');
         }
       }
     } catch (error) {
@@ -182,7 +182,7 @@ const CategorizedGallerySection: React.FC = () => {
     }
   }, [lastSync]); // Only depend on lastSync
 
-  // Setup real-time updates
+  // Setup initial data fetch only
   useEffect(() => {
     isComponentMountedRef.current = true;
     
@@ -191,26 +191,39 @@ const CategorizedGallerySection: React.FC = () => {
 
     return () => {
       isComponentMountedRef.current = false;
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
     };
   }, []); // Empty dependency array for initial setup
 
-  // Separate effect for sync interval to avoid recreating it
+  // Listen for storage events to detect changes from admin panel
   useEffect(() => {
-    if (lastSync && !syncIntervalRef.current) {
-      // Setup periodic sync (every 10 seconds for public gallery)
-      syncIntervalRef.current = setInterval(syncData, 10000);
-    }
-
-    return () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-        syncIntervalRef.current = null;
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === 'gallery-updated' && event.newValue) {
+        console.log('Gallery update detected from admin panel');
+        syncData();
+        // Clear the flag
+        localStorage.removeItem('gallery-updated');
       }
     };
-  }, [lastSync, syncData]);
+
+    // Listen for storage events from other tabs/windows
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also check for updates when the page becomes visible (user switches back to tab)
+    const handleVisibilityChange = () => {
+      if (!document.hidden && localStorage.getItem('gallery-updated')) {
+        console.log('Gallery update detected on tab focus');
+        syncData();
+        localStorage.removeItem('gallery-updated');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [syncData]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
