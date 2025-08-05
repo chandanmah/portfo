@@ -34,8 +34,8 @@ export default function ContactSection() {
                   </div>
                   <div>
                     <p className="text-sm text-[#6B5C4F] uppercase tracking-wide">Email</p>
-                    <a href="mailto:contact@mrmahanta.com" className="text-[#3B3024] text-lg font-medium hover:text-[#8C6239] transition-colors">
-                      contact@mrmahanta.com
+                    <a href="mailto:cmahanta@gmail.com" className="text-[#3B3024] text-lg font-medium hover:text-[#8C6239] transition-colors">
+                      cmahanta@gmail.com
                     </a>
                   </div>
                 </div>
@@ -46,8 +46,8 @@ export default function ContactSection() {
                   </div>
                   <div>
                     <p className="text-sm text-[#6B5C4F] uppercase tracking-wide">Phone</p>
-                    <a href="tel:+13145551234" className="text-[#3B3024] text-lg font-medium hover:text-[#8C6239] transition-colors">
-                      (314) 555-1234
+                    <a href="tel:+13146539229" className="text-[#3B3024] text-lg font-medium hover:text-[#8C6239] transition-colors">
+                      +1 (314) 653 9229
                     </a>
                   </div>
                 </div>
@@ -60,39 +60,6 @@ export default function ContactSection() {
                     <p className="text-sm text-[#6B5C4F] uppercase tracking-wide">Location</p>
                     <p className="text-[#3B3024] text-lg font-medium">St. Louis, Missouri</p>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Studio Information */}
-            <div className="space-y-8">
-              <div>
-                <h3 className="font-playfair text-3xl font-bold text-[#3B3024] mb-6">Studio and Garden</h3>
-              </div>
-
-              <div className="space-y-6">
-                <div className="bg-white/50 backdrop-blur-sm rounded-2xl p-6 border border-[#3B3024]/10">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Calendar className="h-5 w-5 text-[#8C6239]" />
-                    <h4 className="text-lg font-semibold text-[#3B3024]">Studio Visits</h4>
-                  </div>
-                  <p className="text-[#6B5C4F] mb-4">
-                    Private studio visits available by appointment. See my latest works, learn about my techniques, 
-                    and discuss custom commissions.
-                  </p>
-                  <p className="text-sm text-[#8C6239] font-medium">Duration: 1-2 hours • By appointment only</p>
-                </div>
-
-                <div className="bg-white/50 backdrop-blur-sm rounded-2xl p-6 border border-[#3B3024]/10">
-                  <div className="flex items-center gap-3 mb-4">
-                    <MapPin className="h-5 w-5 text-[#8C6239]" />
-                    <h4 className="text-lg font-semibold text-[#3B3024]">Garden Tours</h4>
-                  </div>
-                  <p className="text-[#6B5C4F] mb-4">
-                    Seasonal garden tours showcasing native plants, sustainable gardening practices, and beekeeping. 
-                    Learn about creating harmony between art and nature.
-                  </p>
-                  <p className="text-sm text-[#8C6239] font-medium">Spring & Summer seasons • Group bookings available</p>
                 </div>
               </div>
             </div>
